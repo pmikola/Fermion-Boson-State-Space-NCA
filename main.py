@@ -29,7 +29,7 @@ t = teacher(model, device)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 OT_backend = 'tensorized'
-criterion_model = CustomLoss(device)
+criterion = CustomLoss(device)
 
 optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-6, amsgrad=False)
 
@@ -46,7 +46,7 @@ for period in range(1, no_periods + 1):
     t.fsim.fuel_dens_modifier = 1 / t.fsim.dt
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
-                     last_frame, frame_skip * 2, criterion, optimizer, disc_optimizer, RL_optimizer, device, learning=1,
+                     last_frame, frame_skip * 2, criterion, optimizer ,device, learning=1,
                      num_epochs=1000)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
