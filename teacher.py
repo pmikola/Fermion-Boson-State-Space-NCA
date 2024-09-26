@@ -684,9 +684,8 @@ class teacher(object):
             t_start = time.perf_counter()
             pred_r, pred_g, pred_b, pred_a, pred_s, deppS = self.model(dataset)
             t_pred = time.perf_counter()
-
             t = t_pred - t_start
-            print(f'Pred Time: {t * 1e6:.4f} [us]')
+            print(f'Pred Time: {t * 1e6:.1f} [us]')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
             g_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -750,13 +749,13 @@ class teacher(object):
         plt.show()
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
-                       frame_skip, criterion, optimizer, disc_optimizer, RL_optimizer, device, learning=1,
+                       frame_skip, criterion, optimizer ,device, learning=1,
                        num_epochs=1500):
         (self.no_frame_samples, self.batch_size, self.input_window_size, self.first_frame,
          self.last_frame, self.frame_skip) = (no_frame_samples, batch_size,
                                               input_window_size, first_frame, last_frame, frame_skip)
 
-        criterion_model, criterion_e0, criterion_e1, criterion_e2, criterion_disc, criterion_RL = criterion
+        criterion_model = criterion
         self.num_of_epochs = num_epochs
         model_to_Save = self.model
         if learning == 1:
@@ -804,15 +803,6 @@ class teacher(object):
                 self.seed_setter(int((epoch + 1) * 2))
                 model_output = self.model(dataset)
                 t_pred = time.perf_counter()
-
-                pred_r, pred_g, pred_b, pred_a, pred_s, deepS = model_output
-                mask = self.parameterReinforcer.create_mask(mask)
-                pred_r = pred_r * mask[:, 0:self.model.in_scale, :]
-                pred_g = pred_g * mask[:, self.model.in_scale:self.model.in_scale * 2, :]
-                pred_b = pred_b * mask[:, self.model.in_scale * 2:self.model.in_scale * 3, :]
-                pred_a = pred_a * mask[:, self.model.in_scale * 3:self.model.in_scale * 4, :]
-                pred_s = pred_s * mask[:, self.model.in_scale * 4:self.model.in_scale * 5, :]
-                model_output = pred_r, pred_g, pred_b, pred_a, pred_s, deepS
 
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
@@ -948,7 +938,6 @@ class teacher(object):
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
                         f'vL: {val_loss.item():.3f}, '
                         f'mL: {loss.item():.3f}, '
-                        f'R: {torch.mean(self.parameterReinforcer.next_rewards[-1]):.2f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms]')
                     t = 0.
                     t_epoch = 0.
@@ -1162,45 +1151,22 @@ class teacher(object):
         # hist_loss = r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss
 
         # Note: Deep Supervision Loss
-        x,rres, gres, bres, ares, sres = deepS
+        rres, gres, bres, ares, sres = deepS
         dpSWeight = 0.3
-        x_target = torch.rand_like(x) * dpSWeight
         rres_target = torch.rand_like(rres) * dpSWeight
         gres_target = torch.rand_like(gres) * dpSWeight
         bres_target = torch.rand_like(bres) * dpSWeight
         ares_target = torch.rand_like(ares) * dpSWeight
         sres_target = torch.rand_like(sres) * dpSWeight
-        loss_x, loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
-            f.mse_loss(x, x_target),
+        loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
             f.mse_loss(rres, rres_target),
             f.mse_loss(gres, gres_target),
             f.mse_loss(bres, bres_target),
             f.mse_loss(ares, ares_target),
             f.mse_loss(sres, sres_target))
-        deepSLoss = torch.mean(loss_x) + torch.mean(loss_rres) + torch.mean(loss_gres) + torch.mean(loss_bres) + torch.mean(loss_ares) + torch.mean(loss_sres)
+        deepSLoss = torch.mean(loss_rres) + torch.mean(loss_gres) + torch.mean(loss_bres) + torch.mean(loss_ares) + torch.mean(loss_sres)
         # deepSLoss = loss_x + loss_x_mod + loss_rgbas_prod + loss_rres + loss_gres + loss_bres + loss_ares + loss_sres
 
-        # # Note: Rank Representation Loss - Singular Value decomposition (SVD) # Question: How it will behave in the RL reward learning loop?
-        res = torch.cat([rres, gres, bres, ares, sres], dim=1)
-        preds = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s], dim=1)
-        k = 64
-        rank_weight = 0.6
-        indices = torch.randperm(res.size(0))
-        selected_res_indices = indices[:k]
-        sampled_res = res[selected_res_indices]
-        indices = torch.randperm(preds.size(0))
-        selected_preds_indices = indices[:k]
-        sampled_preds = preds[selected_preds_indices]
-        # U, S, V = torch.linalg.svd(res, full_matrices=False) # Note:  Full matrix svd - slow but better performance (x10 better)
-        Ures, Sres, Vres = torch.svd_lowrank(sampled_res, q=k, niter=2,
-                                             M=None)  # Note: Way faster but less efficient, q is overestimation of rank and niter is subspace iteration, M is the broadcast size
-        Upreds, Spreds, Vpreds = torch.svd_lowrank(sampled_preds, q=k, niter=2, M=None)
-        res_rank_t = torch.dist(sampled_res, Ures @ torch.diag(Sres) @ Vres.T)
-        preds_rank_t = torch.dist(sampled_preds, Upreds @ torch.diag(Spreds) @ Vpreds.T)
-
-        rank_loss = (2 - 3e4 * (res_rank_t / sampled_res.shape[0])) * rank_weight  # NOTE: for high rank extraction
-        rank_loss += (2 - 3e4 * (preds_rank_t / sampled_preds.shape[0])) * rank_weight
-        #rank_loss = (3e4 * (res_low_rank_t / sampled_res.shape[0]))*low_rank_weight # NOTE: for low rank extraction
 
         # Note: SSIM Loss
         l = self.batch_size
@@ -1222,15 +1188,15 @@ class teacher(object):
         rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
-        A, B, C, D, E, F, G, H, I, J = 1., 1., 1., 1., 1., 1., 1., 1., 1., 1  # Note: loss weights for Custom
-        # A, B, C, D, E, F, G, H, I, J = 1e1, 1e1, 3e1, 5e2, 5e2, 5e2, 1e-1, 5e-1, 5., 1.  # Note: loss weights for MSE
-        # A, B, C, D, E, F, G, H, I,j = 0.2, 0.2, 0.85, 2e2, 2e2, 5e1, 1e-1, 1., 5.,1.  # Note: loss weights for Sinkhorn
+        A, B, C, D, E, F, G, H, I = 1., 1., 1., 1., 1., 1., 1., 1., 1.  # Note: loss weights for Custom
+        # A, B, C, D, E, F, G, H, I = 1e1, 1e1, 3e1, 5e2, 5e2, 5e2, 1e-1, 5e-1, 5.  # Note: loss weights for MSE
+        # A, B, C, D, E, F, G, H, I = 0.2, 0.2, 0.85, 2e2, 2e2, 5e1, 1e-1, 1., 5.,1.  # Note: loss weights for Sinkhorn
 
-        loss_weights = (A, B, C, D, E, F, G, H, I, J)
+        loss_weights = (A, B, C, D, E, F, G, H, I)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
-        K = 1. / 2  #len(loss_weights)
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss, rank_loss,
+        J = 1. / 2  #len(loss_weights)
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
                 ssim_val, gradient_penalty_loss)  # Attention: Aggregate all losses here
 
         weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
@@ -1245,9 +1211,9 @@ class teacher(object):
         mean_between_losses = mse_matrix.mean(dim=(1, 2))
         dispersion_loss = std_between_losses / mean_between_losses
         # print(gradient_penalty_loss[0])
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss, rank_loss,
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
                 ssim_val, gradient_penalty_loss, dispersion_loss)
-        loss_weights = (A, B, C, D, E, F, G, H, I, J, K)
+        loss_weights = (A, B, C, D, E, F, G, H, I, J)
         # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
         #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
         #       "<-fft_loss: D",
@@ -1267,35 +1233,6 @@ class teacher(object):
                 final_loss += loss_weights[i] * torch.mean(losses)
             i += 1
             return final_loss
-
-    def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
-
-        dataset = (
-            self.data_input[idx], self.structure_input[idx], self.meta_input_h1[idx], self.meta_input_h2[idx],
-            self.meta_input_h3[idx], self.meta_input_h4[idx], self.meta_input_h5[idx], self.noise_diff_in[idx],
-            self.fmot_in_binary[idx],
-            self.meta_output_h1[idx],
-            self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
-            self.noise_diff_out[idx])
-
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS = model_output
-        r_out = data_output[:, 0:self.model.in_scale, :][idx]
-        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
-        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]
-        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]
-        s_out = structure_output[idx]
-        pred = torch.cat([pred_r.detach(), pred_g.detach(), pred_b.detach(), pred_a.detach(), pred_s.detach()], dim=1)
-        true = torch.cat([r_out, g_out, b_out, a_out, s_out], dim=1)
-        # Note : Fill value for label smoothing
-        fake_labels = torch.full((pred.shape[0], 1), 0.05).to(self.device)
-        true_labels = torch.full((true.shape[0], 1), 0.95).to(self.device)
-        combined_data = torch.cat([pred, true], dim=0)
-        combined_labels = torch.cat([fake_labels, true_labels], dim=0)
-        shuffle_idx = torch.randint(0, combined_data.shape[0], (int(combined_data.shape[0] / 2),)).to(self.device)
-        shuffled_labels = combined_labels[shuffle_idx]
-        disc_pred = self.discriminator(combined_data, dataset, shuffle_idx)
-        disc_loss = criterion(disc_pred, shuffled_labels)
-        return disc_loss
 
     @staticmethod
     def seed_setter(seed):

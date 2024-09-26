@@ -6,29 +6,32 @@ import numpy as np
 import torch
 from torch import nn
 
-
+from model import HyperRadialNeuralFourierCelularAutomata
 from teacher import teacher
 from flameEngine import flame as fl
 from CustomLoss import CustomLoss
+import warnings
 
 # Start ................
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Computational Environment used : ",device)
+warnings.simplefilter(action='ignore', category=FutureWarning)
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # torch.autograd.set_detect_anomaly(True) # Note : Tremendously slowing down program - Attention: Be careful!
 
 no_frame_samples = 50
-batch_size = 256
+batch_size = 128
 input_window_size = 7
 
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
+hdc_dim = 64
 
-model -= HyperRadialNeuralCelularAutomata()
+model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim, device).to(device)
 
 t = teacher(model, device)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
-OT_backend = 'tensorized'
 criterion = CustomLoss(device)
 
 optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-6, amsgrad=False)
