@@ -844,26 +844,27 @@ class teacher(object):
                     val_loss_recent_history = np.array(self.val_loss)[-10:-1]
                     mean_hist_losses = np.mean(loss_recent_history)
                     if loss_recent_history[-1] > loss_recent_history[-2] or loss_recent_history[-1] < \
-                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-2:
+                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-3:
                         reiterate_data = 1
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 50:
+                    if reiterate_counter > 100:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
+                    #print(gloss)
                     g_val_loss = np.sum(np.gradient(val_loss_recent_history))
-                    if g_val_loss > 5e1:
+                    if g_val_loss > 1e2:
                         reiterate_data = 0
-                    if gloss > 5e1:
+                    if gloss > 1e2:
                         grad_counter = 0
                     else:
                         grad_counter += 1
                     # NOTE: lowering lr for  better performance and reset lr within conditions
                     if grad_counter == 3 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.99
+                            param_group['lr'] = param_group['lr'] * 0.999
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
                                 param_group['lr'] = 1e-2
                                 reiterate_counter = 0
@@ -871,63 +872,6 @@ class teacher(object):
                                 print('optimizer -> lr back to starting point')
 
                         grad_counter = 0
-                    if (epoch + 1) % 1 == 0 or reiterate_data == 0:
-                        if loss.item() < mean_hist_losses or  best_loss < mean_hist_losses or reiterate_data == 0:
-                            best_loss = loss.item()
-                            best_losses.append(best_loss)
-                            best_models.append(self.model)
-                        with torch.no_grad():
-                            if len(best_models) > 200:
-                                best_losses = torch.tensor(np.array(best_losses))
-                                n = 5
-                                _, best_n_losses_idx = torch.topk(best_losses, n, largest=False)
-                                best_losses_norm = 1 / (best_losses / best_losses.min())
-                                model_avg_damping = self.model
-                                model_avg_enhance = self.model
-                                param_sum_damping = {name: torch.zeros_like(param) for name, param in
-                                                     model_avg_damping.named_parameters()}
-                                param_sum_enhance = {name: torch.zeros_like(param) for name, param in
-                                                     model_avg_enhance.named_parameters()}
-
-                                for m in best_n_losses_idx:
-                                    for (name_best, param_best), (name, param) in zip(
-                                            best_models[best_n_losses_idx[0]].named_parameters(),
-                                            best_models[m].named_parameters()):
-                                        param_best_sign = torch.sgn(param_best)
-                                        param_sign = torch.sgn(param)
-
-                                        opposite_sign_mask = param_best_sign != param_sign
-                                        same_sign_mask = param_best_sign == param_sign
-
-                                        param_sum_damping[name][opposite_sign_mask] += param[opposite_sign_mask] * \
-                                                                                       best_losses_norm[m]
-                                        param_sum_enhance[name][same_sign_mask] += param[same_sign_mask] * \
-                                                                                   best_losses_norm[m]
-
-                                for name, param in model_avg_damping.named_parameters():
-                                    param_avg = param_sum_damping[name] / n
-                                    param.copy_(param_avg)
-
-                                for name, param in model_avg_enhance.named_parameters():
-                                    param_avg = param_sum_enhance[name] / n
-                                    param.copy_(param_avg)
-
-                                for (name, param), (name_enh, param_enh), (name_damp, param_damp) in zip(
-                                        self.model.named_parameters(), model_avg_enhance.named_parameters(),
-                                        model_avg_damping.named_parameters()):
-                                    param_selector = random.randint(0,
-                                                                    4)  # Note : 20% chance to enhance or damp parameter
-                                    if param_selector == 0:
-                                        param.copy_(param_enh)
-                                    elif param_selector == 1:
-                                        param.copy_(param_damp)
-                                    else:
-                                        pass
-
-                                print('model_avg -> weighted average -> main')
-                                best_models = []
-                                best_losses = []
-                                best_loss = mean_hist_losses
 
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
@@ -936,8 +880,8 @@ class teacher(object):
                     t_epoch_current = epoch * t_epoch
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
-                        f'vL: {val_loss.item():.3f}, '
-                        f'mL: {loss.item():.3f}, '
+                        f'vL: {val_loss.item():.4f}, '
+                        f'mL: {loss.item():.4f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms]')
                     t = 0.
                     t_epoch = 0.
@@ -1188,7 +1132,7 @@ class teacher(object):
         rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
-        A, B, C, D, E, F, G, H, I = 1., 1., 1., 1., 1., 1., 1., 1., 1.  # Note: loss weights for Custom
+        A, B, C, D, E, F, G, H, I = 1., 1., 1., 1e2, 1e2, 1., 1., 1., 1.  # Note: loss weights for Custom
         # A, B, C, D, E, F, G, H, I = 1e1, 1e1, 3e1, 5e2, 5e2, 5e2, 1e-1, 5e-1, 5.  # Note: loss weights for MSE
         # A, B, C, D, E, F, G, H, I = 0.2, 0.2, 0.85, 2e2, 2e2, 5e1, 1e-1, 1., 5.,1.  # Note: loss weights for Sinkhorn
 
@@ -1214,14 +1158,14 @@ class teacher(object):
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
                 ssim_val, gradient_penalty_loss, dispersion_loss)
         loss_weights = (A, B, C, D, E, F, G, H, I, J)
+
         # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
         #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
         #       "<-fft_loss: D",
         #       E * diff_fft_loss.mean().item(), "<-diff_fft_loss: E", F * hist_loss.mean().item(), "<-hist_loss: F",
-        #       G * deepSLoss.mean().item(), "<-deepSLoss: G", H * rank_loss.mean().item(), "<-rank_loss: H",
+        #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
         #       I * ssim_val.mean().item(),
-        #       "<-ssim_val: I", gradient_penalty_loss.mean().item() * J, "<-gradient_penalty_loss",
-        #       dispersion_loss.mean().item() * K, "<-dispersion_loss: K")
+        #       "<-ssim_val: I", gradient_penalty_loss.mean().item() * J, "<-gradient_penalty_loss")
 
         final_loss, i = 0., 0
         for losses in LOSS:

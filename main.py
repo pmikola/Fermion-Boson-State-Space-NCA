@@ -25,16 +25,17 @@ input_window_size = 7
 
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
-hdc_dim = 64
+hdc_dim = 5
+rbf_probes_number = 16
 
-model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim, device).to(device)
+model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number, device).to(device)
 
 t = teacher(model, device)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 criterion = CustomLoss(device)
 
-optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-6, amsgrad=False)
+optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-6, amsgrad=False)
 
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch

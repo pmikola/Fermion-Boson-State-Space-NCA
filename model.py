@@ -4,25 +4,36 @@ import torch
 import torch.nn as nn
 
 class HyperRadialNeuralFourierCelularAutomata(nn.Module):
-    def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim, device):
+    def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_dim, device):
         super(HyperRadialNeuralFourierCelularAutomata, self).__init__()
         self.device = device
         self.no_frame_samples = no_frame_samples
         self.batch_size = batch_size
         self.input_window_size = input_window_size
         self.hdc_dim = hdc_dim
+        self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.parameters_temp = nn.Parameter(torch.rand((self.in_scale, self.in_scale), dtype=torch.float))
         self.bits = 32
-        self.hdc_projection_matrix = torch.zeros(self.batch_size,self.in_scale**2,self.bits, self.hdc_dim, dtype=torch.int32).to(self.device)
+        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,self.in_scale**2,self.bits, self.hdc_dim).uniform_(0., 2.),requires_grad=True).to(self.device)
+        self.xor_ste = XorSTE.apply
+        self.NCA = nn.Conv3d(in_channels=self.rbf_dim, out_channels=self.rbf_dim, kernel_size=(3, 3, 3), stride=1, padding=(1, 1, 1))
+        self.conv0 = nn.Conv3d(in_channels=self.rbf_dim, out_channels=1, kernel_size=(1, 1, 1), stride=1, padding=(0, 0, 0))
+        self.leaky_relu_slope = 0.1
+        self.lin_compress = nn.Linear(in_features=self.in_scale**2*self.bits*self.hdc_dim,out_features=self.in_scale**2)
+        self.lin_r= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
+        self.lin_g= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
+        self.lin_b= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
+        self.lin_a= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
+        self.lin_s= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
 
+        self.init_weights()
     def init_weights(self):
         if isinstance(self, nn.Linear):
             # torch.nn.init.xavier_uniform(self.weight)
             self.weight.data.normal_(mean=0.0, std=1.0)
             self.bias.data.fill_(0.01)
 
-        if isinstance(self, nn.Conv1d):
+        if isinstance(self, nn.Conv3d):
             self.weight.data.normal_(mean=0.0, std=1.0)
             self.bias.data.fill_(0.01)
 
@@ -34,11 +45,12 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         if callable(reset_parameters):
             self.reset_parameters()
         # NOTE : Making sure that nn.conv2d and nn.linear will be reset
-        if isinstance(self, nn.Conv2d) or isinstance(self, nn.Linear):
+        if isinstance(self, nn.Conv3d) or isinstance(self, nn.Linear):
             self.reset_parameters()
 
     def forward(self, din):
-        t_start = time.perf_counter()
+        # torch.cuda.synchronize()
+        # t_start = time.perf_counter()
         old_batch_size = self.batch_size
         (data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
          meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
@@ -58,27 +70,29 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
              meta_output_h1, meta_output_h2, meta_output_h3, meta_output_h4,
              meta_output_h5, noise_var_out) = stacked_vars
 
-
         #################################################################
         r = data_input[:, 0:self.in_scale, :]
         g = data_input[:, self.in_scale:self.in_scale * 2, :]
         b = data_input[:, self.in_scale * 2:self.in_scale * 3, :]
         a = data_input[:, self.in_scale * 3:self.in_scale * 4, :]
-        s = structure_input*self.parameters_temp
-        deepS = r, g, b, a, s
+        s = structure_input
+
 
         #### HDC ENCODING
+        time_in = meta_input_h2.unsqueeze(1).unsqueeze(3)
+        time_out = meta_output_h2.unsqueeze(1).unsqueeze(3)
         r = torch.flatten(r,start_dim=1)
         g = torch.flatten(g, start_dim=1)
         b = torch.flatten(b, start_dim=1)
         a = torch.flatten(a, start_dim=1)
         s = torch.flatten(s, start_dim=1)
         input_dim = r.shape[1]
-        sparsity=0.5
+        sparsity=1.
         num_nonzero_elements = int(sparsity * input_dim *  self.hdc_dim)
         non_zero_indices = torch.randint(0, input_dim * self.hdc_dim, (num_nonzero_elements,)).to(self.device)
-        self.hdc_projection_matrix.view(-1)[non_zero_indices] = 1
-        self.hdc_projection_matrix.view(-1)[~non_zero_indices] = 0
+        hdc_projection_matrix = torch.zeros(self.batch_size,self.in_scale**2,self.bits, self.hdc_dim, dtype=torch.int32).to(self.device)
+        hdc_projection_matrix.view(-1)[non_zero_indices] = 1
+        hdc_projection_matrix.view(-1)[~non_zero_indices] = 0
 
         r_bin = self.binary(r.view(dtype=torch.int32)[:,:],self.bits).unsqueeze(3)
         g_bin = self.binary(g.view(dtype=torch.int32)[:,:],self.bits).unsqueeze(3)
@@ -86,30 +100,50 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         a_bin = self.binary(a.view(dtype=torch.int32)[:,:],self.bits).unsqueeze(3)
         s_bin = self.binary(s.view(dtype=torch.int32)[:,:],self.bits).unsqueeze(3)
 
-
-        r_bin = r_bin.repeat(1,1,1, self.hdc_dim)
-        g_bin = g_bin.repeat(1,1,1, self.hdc_dim)
-        b_bin = b_bin.repeat(1,1,1, self.hdc_dim)
-        a_bin = a_bin.repeat(1,1,1, self.hdc_dim)
-        s_bin = s_bin.repeat(1,1,1, self.hdc_dim)
-
-        r_bin.bitwise_xor_(self.hdc_projection_matrix)
-        g_bin.bitwise_xor_(self.hdc_projection_matrix)
-        b_bin.bitwise_xor_(self.hdc_projection_matrix)
-        a_bin.bitwise_xor_(self.hdc_projection_matrix)
-        s_bin.bitwise_xor_(self.hdc_projection_matrix)
+        hdc_projection_matrix.bitwise_xor_(r_bin)
+        hdc_projection_matrix.bitwise_xor_(g_bin)
+        hdc_projection_matrix.bitwise_xor_(b_bin)
+        hdc_projection_matrix.bitwise_xor_(a_bin)
+        hdc_projection_matrix.bitwise_xor_(s_bin)
+        hdc_projection_matrix.bitwise_xor_(time_in)
+        hdc_projection_matrix.bitwise_xor_(time_out)
+        # Note: Check witch is better in the final result - using one hdc_projection matrix or rgbas (5) tensors separetly?
         #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
-        #### RBF PROBING
+        #### RBF PROBING HAMMING DISTANCE
+        rbf_distances = self.xor_ste(self.rbf_probes.unsqueeze(0),hdc_projection_matrix.unsqueeze(1))
+        #### RBF PROBING HAMMING DISTANCE
+        dx = torch.nn.functional.leaky_relu(self.NCA(rbf_distances),self.leaky_relu_slope)
+        x = rbf_distances + dx
+        x = self.conv0(x)
+        x = torch.nn.functional.leaky_relu(x,self.leaky_relu_slope).flatten(start_dim=1)
+        x = self.lin_compress(x)
+        x = torch.nn.functional.leaky_relu(x,self.leaky_relu_slope)
 
-        t_stop = time.perf_counter()
-        print(r_bin.shape)
-        print("model internal time : ",((t_stop-t_start)*1e6)/self.batch_size, "[us]")
-        time.sleep(10000)
+        r = self.lin_r(x).view(self.batch_size, self.in_scale, self.in_scale)
+        g = self.lin_g(x).view(self.batch_size, self.in_scale, self.in_scale)
+        b = self.lin_b(x).view(self.batch_size, self.in_scale, self.in_scale)
+        a = self.lin_a(x).view(self.batch_size, self.in_scale, self.in_scale)
+        s = self.lin_s(x).view(self.batch_size, self.in_scale, self.in_scale)
+        deepS = r, g, b, a, s
+        # torch.cuda.current_stream().synchronize()
+        # t_stop = time.perf_counter()
+        # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
+        # time.sleep(10000)
         self.batch_size = old_batch_size
         return r, g, b, a, s, deepS
 
-    def binary(self,x, bits):
+    @staticmethod
+    def binary(x, bits):
         mask = 2 ** torch.arange(bits).to(x.device, x.dtype)
         return x.unsqueeze(-1).bitwise_and(mask).ne(0).byte()
 
+class XorSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, rbf, hdc_proj):
+        rbf = torch.nn.functional.hardtanh(rbf,0,2)
+        return torch.bitwise_xor(rbf.int(), hdc_proj.int()).float()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, grad_output
 
