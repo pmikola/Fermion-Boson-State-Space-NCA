@@ -18,7 +18,6 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.xor_ste = XorSTE.apply
         self.NCA = nn.Conv3d(in_channels=self.rbf_dim, out_channels=self.rbf_dim, kernel_size=(3, 3, 3), stride=1, padding=(1, 1, 1))
         self.conv0 = nn.Conv3d(in_channels=self.rbf_dim, out_channels=1, kernel_size=(1, 1, 1), stride=1, padding=(0, 0, 0))
-        self.leaky_relu_slope = 0.1
         self.lin_compress = nn.Linear(in_features=self.in_scale**2*self.bits*self.hdc_dim,out_features=self.in_scale**2)
         self.lin_r= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
         self.lin_g= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
@@ -49,8 +48,8 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             self.reset_parameters()
 
     def forward(self, din):
-        # torch.cuda.synchronize()
-        # t_start = time.perf_counter()
+        torch.cuda.synchronize()
+        t_start = time.perf_counter()
         old_batch_size = self.batch_size
         (data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
          meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
@@ -112,23 +111,23 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         #### RBF PROBING HAMMING DISTANCE
         rbf_distances = self.xor_ste(self.rbf_probes.unsqueeze(0),hdc_projection_matrix.unsqueeze(1))
         #### RBF PROBING HAMMING DISTANCE
-        dx = torch.nn.functional.leaky_relu(self.NCA(rbf_distances),self.leaky_relu_slope)
+        dx = torch.tanh(self.NCA(rbf_distances))
         x = rbf_distances + dx
-        x = self.conv0(x)
-        x = torch.nn.functional.leaky_relu(x,self.leaky_relu_slope).flatten(start_dim=1)
-        x = self.lin_compress(x)
-        x = torch.nn.functional.leaky_relu(x,self.leaky_relu_slope)
-
-        r = self.lin_r(x).view(self.batch_size, self.in_scale, self.in_scale)
-        g = self.lin_g(x).view(self.batch_size, self.in_scale, self.in_scale)
-        b = self.lin_b(x).view(self.batch_size, self.in_scale, self.in_scale)
-        a = self.lin_a(x).view(self.batch_size, self.in_scale, self.in_scale)
-        s = self.lin_s(x).view(self.batch_size, self.in_scale, self.in_scale)
-        deepS = r, g, b, a, s
-        # torch.cuda.current_stream().synchronize()
-        # t_stop = time.perf_counter()
-        # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
-        # time.sleep(10000)
+        # x = self.conv0(x)
+        # x = torch.tanh(x).flatten(start_dim=1)
+        # x = self.lin_compress(x)
+        # x = torch.tanh(x)
+        #
+        # r = self.lin_r(x).view(self.batch_size, self.in_scale, self.in_scale)
+        # g = self.lin_g(x).view(self.batch_size, self.in_scale, self.in_scale)
+        # b = self.lin_b(x).view(self.batch_size, self.in_scale, self.in_scale)
+        # a = self.lin_a(x).view(self.batch_size, self.in_scale, self.in_scale)
+        # s = self.lin_s(x).view(self.batch_size, self.in_scale, self.in_scale)
+        # deepS = r, g, b, a, s
+        torch.cuda.current_stream().synchronize()
+        t_stop = time.perf_counter()
+        print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
+        time.sleep(10000)
         self.batch_size = old_batch_size
         return r, g, b, a, s, deepS
 

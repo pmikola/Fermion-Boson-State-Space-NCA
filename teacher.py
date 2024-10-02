@@ -849,7 +849,7 @@ class teacher(object):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 100:
+                    if reiterate_counter > 50:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -864,13 +864,12 @@ class teacher(object):
                     # NOTE: lowering lr for  better performance and reset lr within conditions
                     if grad_counter == 3 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.999
+                            param_group['lr'] = param_group['lr'] * 0.995
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
                                 param_group['lr'] = 1e-2
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
-
                         grad_counter = 0
 
                 t_epoch_stop = time.perf_counter()

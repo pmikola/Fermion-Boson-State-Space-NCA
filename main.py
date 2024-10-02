@@ -26,7 +26,7 @@ input_window_size = 7
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
 hdc_dim = 5
-rbf_probes_number = 16
+rbf_probes_number = 5
 
 model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number, device).to(device)
 
