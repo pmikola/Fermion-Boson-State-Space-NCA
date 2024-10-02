@@ -685,7 +685,7 @@ class teacher(object):
             pred_r, pred_g, pred_b, pred_a, pred_s, deppS = self.model(dataset)
             t_pred = time.perf_counter()
             t = t_pred - t_start
-            print(f'Pred Time: {t * 1e6:.1f} [us]')
+            print(f'Pred Time: {t * 1e3:.1f} [ms]')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
             g_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -757,6 +757,7 @@ class teacher(object):
 
         criterion_model = criterion
         self.num_of_epochs = num_epochs
+        self.model.last_frame = self.last_frame
         model_to_Save = self.model
         if learning == 1:
             best_loss = float('inf')
@@ -1095,19 +1096,19 @@ class teacher(object):
 
         # Note: Deep Supervision Loss
         rres, gres, bres, ares, sres = deepS
-        dpSWeight = 0.3
-        rres_target = torch.rand_like(rres) * dpSWeight
-        gres_target = torch.rand_like(gres) * dpSWeight
-        bres_target = torch.rand_like(bres) * dpSWeight
-        ares_target = torch.rand_like(ares) * dpSWeight
-        sres_target = torch.rand_like(sres) * dpSWeight
+        dpSWeight = 0.5
+        rres_target = torch.rand_like(rres)+rres-0.5
+        gres_target = torch.rand_like(gres)+gres-0.5
+        bres_target = torch.rand_like(bres)+bres-0.5
+        ares_target = torch.rand_like(ares)+ares-0.5
+        sres_target = torch.rand_like(sres)+sres-0.5
         loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
             f.mse_loss(rres, rres_target),
             f.mse_loss(gres, gres_target),
             f.mse_loss(bres, bres_target),
             f.mse_loss(ares, ares_target),
             f.mse_loss(sres, sres_target))
-        deepSLoss = torch.mean(loss_rres) + torch.mean(loss_gres) + torch.mean(loss_bres) + torch.mean(loss_ares) + torch.mean(loss_sres)
+        deepSLoss = torch.mean(loss_rres)* dpSWeight + torch.mean(loss_gres)* dpSWeight + torch.mean(loss_bres)* dpSWeight + torch.mean(loss_ares)* dpSWeight + torch.mean(loss_sres)* dpSWeight
         # deepSLoss = loss_x + loss_x_mod + loss_rgbas_prod + loss_rres + loss_gres + loss_bres + loss_ares + loss_sres
 
 
