@@ -8,7 +8,7 @@ from NCA import NCA
 
 
 class HyperRadialNeuralFourierCelularAutomata(nn.Module):
-    def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_dim, device):
+    def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_dim,nca_steps, device):
         super(HyperRadialNeuralFourierCelularAutomata, self).__init__()
         self.last_frame = None
         self.device = device
@@ -18,19 +18,14 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.bits = 32
         self.modes = 16
-        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5*self.in_scale**2+self.modes, self.hdc_dim).uniform_(0., 2.), requires_grad=False).to(self.device)
-        self.xor_ste = XorSTE.apply
-        self.compress = nn.Conv2d(in_channels=self.rbf_dim,out_channels=5,kernel_size=1)
-        self.NCA = NCA(5)
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((self.in_scale**2,1))
-        self.lin_r= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
-        self.lin_g= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
-        self.lin_b= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
-        self.lin_a= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
-        self.lin_s= nn.Linear(in_features=self.in_scale**2,out_features=self.in_scale**2)
-
+        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(0., 1.), requires_grad=True).to(self.device)
+        self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=self.rbf_dim, kernel_size=1)
+        self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=1)
+        self.nca_steps = nca_steps
+        self.act = nn.Tanh()
+        self.NCA = NCA(5,self.nca_steps)
+        self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=1)
         self.init_weights()
 
     def init_weights(self):
@@ -38,11 +33,11 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             if isinstance(m, nn.Linear):
                 m.weight.data.normal_(mean=0.0, std=1.0)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.01)
+                    m.bias.data.fill_(0.05)
             elif isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
-                m.weight.data.normal_(mean=0.0, std=1.0)
+                nn.init.kaiming_normal_(m.weight)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.01)
+                    m.bias.data.fill_(0.05)
             elif isinstance(m, nn.Parameter):
                 m.data.normal_(mean=0.0, std=1.0)
 
@@ -54,7 +49,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         if isinstance(self, nn.Conv3d) or isinstance(self, nn.Linear):
             self.reset_parameters()
 
-    def forward(self, din):
+    def forward(self, din,spiking_probabilities):
         torch.cuda.synchronize()
         t_start = time.perf_counter()
         old_batch_size = self.batch_size
@@ -84,38 +79,32 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         b = data_input[:, self.in_scale * 2:self.in_scale * 3, :].unsqueeze(1)
         a = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s = structure_input.unsqueeze(1)
-
         data = torch.cat([r,g,b,a,s],dim=1)
-        print(data.shape)
         #### HDC ENCODING
         input_dim = data.shape[1]
         sparsity=1.
         num_nonzero_elements = int(sparsity * input_dim * self.hdc_dim)
         non_zero_indices = torch.randint(0, input_dim * self.hdc_dim, (num_nonzero_elements,), device=self.device)
         signs = torch.randint(0, 2, (num_nonzero_elements,), device=self.device,dtype=torch.int32) * 2 - 1
-        hdc_projection_matrix = torch.zeros(self.batch_size,input_dim+self.modes, self.hdc_dim, device=self.device)
+        hdc_projection_matrix = torch.zeros(self.batch_size,input_dim, self.hdc_dim, device=self.device)
         hdc_projection_matrix.view(-1)[non_zero_indices] = signs.float()
         time_in = meta_input_h5
         time_out = meta_output_h5
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
-        data = torch.cat([data, time_encoded], dim=1)
-
+        time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
+        time_encoded = torch.tanh(self.compress_time(time_encoded))
+        data = data * time_encoded + data
         # Note: Check witch is better in the final result - using one hdc_projection matrix or rgbas (5) tensors separetly?
         #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
         #### RBF PROBING HAMMING DISTANCE
-
-        data_projection = torch.einsum('bi,bjd->bjd',data,hdc_projection_matrix)
-        rbf_distances = self.rbf_probes.unsqueeze(0) - data_projection.unsqueeze(1)
+        data_projection = torch.einsum('bchw,bkn->bkhw',data,hdc_projection_matrix)
+        rbf_distances = self.rbf_probes - data_projection.unsqueeze(1).unsqueeze(5)
         rbf_distances = rbf_distances ** 2
-
         #### RBF PROBING HAMMING DISTANCE
-        print(rbf_distances.shape)
-        x = torch.tanh(self.compress(rbf_distances))
-        print(x.shape)
-        x = torch.tanh(self.NCA(x,20))
-        print(x.shape)
-        x = self.adaptive_pool(x).squeeze(-1)
-        print(x.shape)
+        x = torch.mean(rbf_distances,dim=-1)
+        x = self.act(self.compress(x)).squeeze(1)
+        x = self.NCA(x,spiking_probabilities)
+        x =  self.compress_NCA_out(x)
         r = x[: , 0 ,:].view(self.batch_size,self.in_scale,self.in_scale)
         g = x[: , 1, :].view(self.batch_size,self.in_scale,self.in_scale)
         b = x[: , 2, :].view(self.batch_size,self.in_scale,self.in_scale)
@@ -124,8 +113,8 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         deepS = r, g, b, a, s
         torch.cuda.current_stream().synchronize()
         t_stop = time.perf_counter()
-        print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
-        time.sleep(10000)
+        # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
+        # time.sleep(10000)
         self.batch_size = old_batch_size
         return r, g, b, a, s, deepS
 
@@ -149,14 +138,3 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             else:
                 pe[:,i] = (torch.cos(angle_in)+torch.sin(angle_out))/2
         return pe
-
-class XorSTE(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, rbf, hdc_proj):
-        rbf = torch.nn.functional.hardtanh(rbf,0,2)
-        return torch.bitwise_xor(rbf.int(), hdc_proj.int()).float()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output, grad_output
-

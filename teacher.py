@@ -5,6 +5,9 @@ import random
 import struct
 import time
 from statistics import mean
+
+from torch import nn
+
 import ssim
 import kornia
 import numpy as np
@@ -15,7 +18,7 @@ import torch.nn.utils as nn_utils
 import torch.nn.functional as f
 
 
-class teacher(object):
+class teacher(nn.Module):
     def __init__(self, model, device):
         super(teacher, self).__init__()
         #self.t = None
@@ -184,7 +187,10 @@ class teacher(object):
             choose_diffrent_frame = 0
             noise_flag = torch.randint(low=0, high=10, size=(1,))
             # Note: Below is the pseudo diffusion process
-            noise_mod = 1.
+            if create_val_dataset == 1:
+                noise_mod = 0.
+            else:
+                noise_mod = 1 / (1 + self.epoch)
             if noise_flag < 3:
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
@@ -453,6 +459,7 @@ class teacher(object):
         meta_tensor = []
         meta_binary = []
         field_names = []
+        spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
 
         for name in folder_names:
             if os.path.exists(name):
@@ -682,7 +689,7 @@ class teacher(object):
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
 
             t_start = time.perf_counter()
-            pred_r, pred_g, pred_b, pred_a, pred_s, deppS = self.model(dataset)
+            pred_r, pred_g, pred_b, pred_a, pred_s, deppS = self.model(dataset,spiking_probabilities)
             t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -749,7 +756,7 @@ class teacher(object):
         plt.show()
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
-                       frame_skip, criterion, optimizer ,device, learning=1,
+                       frame_skip, criterion, optimizer, device, learning=1,
                        num_epochs=1500):
         (self.no_frame_samples, self.batch_size, self.input_window_size, self.first_frame,
          self.last_frame, self.frame_skip) = (no_frame_samples, batch_size,
@@ -784,7 +791,7 @@ class teacher(object):
             for epoch in range(num_epochs):
                 self.epoch = epoch
                 t_epoch_start = time.perf_counter()
-                self.seed_setter(int(epoch + 1))
+                #self.seed_setter(int(epoch + 1))
                 if reiterate_data == 0:
                     self.data_preparation()
                     print("new sets of data prepared!")
@@ -800,31 +807,27 @@ class teacher(object):
                            self.meta_output_h2[m_idx], self.meta_output_h3[m_idx], self.meta_output_h4[m_idx],
                            self.meta_output_h5[m_idx], self.noise_diff_out[m_idx])
 
+                spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
                 t_start = time.perf_counter()
-                self.seed_setter(int((epoch + 1) * 2))
-                model_output = self.model(dataset)
+                model_output = self.model(dataset,spiking_probabilities)
                 t_pred = time.perf_counter()
 
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
-                if loss.dim() > 0:
-                    lidx = torch.argmin(loss)
-                    optimizer.zero_grad(set_to_none=True)
-                    loss[lidx].backward()
-                    optimizer.step()
-                else:
-                    optimizer.zero_grad(set_to_none=True)
-                    loss.backward()
-                    max_norm = 1.
-                    nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
-                    optimizer.step()
+
+
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                max_norm = 1.
+                nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
+                optimizer.step()
                 # if (epoch + 1) % 5 == 0:
 
                 if self.validation_dataset is not None:
                     self.model.eval()
                     with torch.no_grad():
-                        val_model_output = self.model(self.validation_dataset)
+                        val_model_output = self.model(self.validation_dataset,spiking_probabilities)
                         val_loss = self.loss_calculation(self.model, val_idx, val_model_output, self.data_input_val,
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
@@ -1051,7 +1054,7 @@ class teacher(object):
         t_1 = t_1.squeeze(1)
         # Solution for learning and maintaining of the proper color and other element space
         bandwidth = torch.tensor(0.1).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
-        bins = 100  # Note: 255 values
+        bins = 255  # Note: 255 values
         r_out = torch.flatten(r_out, start_dim=1)
         pred_r = torch.flatten(pred_r, start_dim=1)
         bins_true = torch.linspace(r_out.min(), r_out.max(), bins).to(self.device)
@@ -1132,14 +1135,13 @@ class teacher(object):
         rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
-        A, B, C, D, E, F, G, H, I = 1., 1., 1., 1e2, 1e2, 1., 1., 1., 1.  # Note: loss weights for Custom
+        A, B, C, D, E, F, G, H, I, J = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3,1.  # Note: loss weights for Custom
         # A, B, C, D, E, F, G, H, I = 1e1, 1e1, 3e1, 5e2, 5e2, 5e2, 1e-1, 5e-1, 5.  # Note: loss weights for MSE
         # A, B, C, D, E, F, G, H, I = 0.2, 0.2, 0.85, 2e2, 2e2, 5e1, 1e-1, 1., 5.,1.  # Note: loss weights for Sinkhorn
 
         loss_weights = (A, B, C, D, E, F, G, H, I)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
-        J = 1. / 2  #len(loss_weights)
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
                 ssim_val, gradient_penalty_loss)  # Attention: Aggregate all losses here
 
@@ -1164,8 +1166,9 @@ class teacher(object):
         #       "<-fft_loss: D",
         #       E * diff_fft_loss.mean().item(), "<-diff_fft_loss: E", F * hist_loss.mean().item(), "<-hist_loss: F",
         #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
-        #       I * ssim_val.mean().item(),
-        #       "<-ssim_val: I", gradient_penalty_loss.mean().item() * J, "<-gradient_penalty_loss")
+        #       H * ssim_val.mean().item(),
+        #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",
+        #       dispersion_loss.mean().item() * J, "<- dispersion loss: J")
 
         final_loss, i = 0., 0
         for losses in LOSS:
