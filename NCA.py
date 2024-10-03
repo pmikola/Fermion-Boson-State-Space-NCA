@@ -11,8 +11,8 @@ class NCA(nn.Module):
         #self.nca_layer_5 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=(5, 5),stride=1,padding=(2, 2))
         #self.nca_layer_7 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=(7, 7),stride=1,padding=(3, 3))
         self.nca_fusion = nn.Conv2d(in_channels=2*in_channels,out_channels=in_channels,kernel_size=1,stride=1,padding=0)
-        # self.act = nn.LeakyReLU(0.1)
-        self.act = nn.Tanh()
+        self.act = nn.LeakyReLU(0.1)
+        # self.act = nn.Tanh()
         self.step_param = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
 

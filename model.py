@@ -19,7 +19,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
         self.modes = 16
-        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(0., 1.), requires_grad=True).to(self.device)
+        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=False).to(self.device)
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=self.rbf_dim, kernel_size=1)
         self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=1)
         self.nca_steps = nca_steps
