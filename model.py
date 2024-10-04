@@ -18,11 +18,11 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.modes = 128
+        self.modes = 32
         self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=True).to(self.device)
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
         self.gate = nn.Parameter(torch.rand(1)).to(self.device)
-        self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=1)
+        self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=3,stride=1,padding=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.NCA = NCA(5,self.nca_steps,self.device)
@@ -39,11 +39,11 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.05)
+                    m.bias.data.fill_(0.00)
             elif isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
-                    m.bias.data.fill_(0.05)
+                    m.bias.data.fill_(0.00)
             elif isinstance(m, nn.Parameter):
                 m.data.normal_(mean=0.0, std=0.1)
 
