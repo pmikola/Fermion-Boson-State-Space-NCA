@@ -98,7 +98,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         time_out = meta_output_h5
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
         time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
-        time_encoded = torch.tanh(self.compress_time(time_encoded))
+        time_encoded = self.compress_time(time_encoded)
         data = data * (1 - self.gate) + time_encoded * self.gate
         #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
         #### RBF PROBING HAMMING DISTANCE
