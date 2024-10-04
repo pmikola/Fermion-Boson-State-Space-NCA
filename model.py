@@ -18,7 +18,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.modes = 16
+        self.modes = 128
         self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=True).to(self.device)
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
         self.gate = nn.Parameter(torch.rand(1)).to(self.device)
@@ -27,20 +27,25 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.act = nn.ELU(alpha=1.0)
         self.NCA = NCA(5,self.nca_steps,self.device)
         self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=1)
+        self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.a = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.s = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.init_weights()
 
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                m.weight.data.normal_(mean=0.0, std=1.0)
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     m.bias.data.fill_(0.05)
             elif isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
                     m.bias.data.fill_(0.05)
             elif isinstance(m, nn.Parameter):
-                m.data.normal_(mean=0.0, std=1.0)
+                m.data.normal_(mean=0.0, std=0.1)
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
@@ -106,12 +111,12 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         x = torch.mean(rbf_distances,dim=-1)
         x = self.act(self.compress(x)).squeeze(1)
         x,nca_var = self.NCA(x,spiking_probabilities)
-        x =  self.compress_NCA_out(x)
-        r = x[: , 0 ,:, :]
-        g = x[: , 1, :, :]
-        b = x[: , 2, :, :]
-        a = x[: , 3, :, :]
-        s = x[: , 4, :, :]
+        x =   self.act(self.compress_NCA_out(x))
+        r = self.r(x).squeeze(1)
+        g = self.g(x).squeeze(1)
+        b = self.b(x).squeeze(1)
+        a = self.a(x).squeeze(1)
+        s = self.s(x).squeeze(1)
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()
@@ -136,7 +141,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             angle_in = angle_in.unsqueeze(0)
             angle_out = angle_out.unsqueeze(0)
             if i % 2 == 0:
-                pe[:,i] = (torch.sin(angle_in)+torch.cos(angle_in))/2
+                pe[:,i] = (torch.sin(angle_in)+torch.cos(angle_out))/2
             else:
                 pe[:,i] = (torch.cos(angle_in)+torch.sin(angle_out))/2
         return pe

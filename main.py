@@ -27,7 +27,7 @@ no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
 hdc_dim = 5
 rbf_probes_number = 5
-nca_steps = 20
+nca_steps = 15
 
 model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
 torch.save(model.state_dict(), 'model.pt')
