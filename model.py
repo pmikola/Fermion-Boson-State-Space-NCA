@@ -19,12 +19,13 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
         self.modes = 16
-        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=False).to(self.device)
-        self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=self.rbf_dim, kernel_size=1)
+        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=True).to(self.device)
+        self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
+        self.gate = nn.Parameter(torch.rand(1)).to(self.device)
         self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=1)
         self.nca_steps = nca_steps
-        self.act = nn.Tanh()
-        self.NCA = NCA(5,self.nca_steps)
+        self.act = nn.ELU(alpha=1.0)
+        self.NCA = NCA(5,self.nca_steps,self.device)
         self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=1)
         self.init_weights()
 
@@ -50,8 +51,8 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
             self.reset_parameters()
 
     def forward(self, din,spiking_probabilities):
-        torch.cuda.synchronize()
-        t_start = time.perf_counter()
+        #torch.cuda.synchronize()
+        #t_start = time.perf_counter()
         old_batch_size = self.batch_size
         (data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
          meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
@@ -82,7 +83,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         data = torch.cat([r,g,b,a,s],dim=1)
         #### HDC ENCODING
         input_dim = data.shape[1]
-        sparsity=1.
+        sparsity= 1.
         num_nonzero_elements = int(sparsity * input_dim * self.hdc_dim)
         non_zero_indices = torch.randint(0, input_dim * self.hdc_dim, (num_nonzero_elements,), device=self.device)
         signs = torch.randint(0, 2, (num_nonzero_elements,), device=self.device,dtype=torch.int32) * 2 - 1
@@ -93,30 +94,31 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
         time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
         time_encoded = torch.tanh(self.compress_time(time_encoded))
-        data = data * time_encoded + data
-        # Note: Check witch is better in the final result - using one hdc_projection matrix or rgbas (5) tensors separetly?
+        data = data * (1 - self.gate) + time_encoded * self.gate
         #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
         #### RBF PROBING HAMMING DISTANCE
         data_projection = torch.einsum('bchw,bkn->bkhw',data,hdc_projection_matrix)
         rbf_distances = self.rbf_probes - data_projection.unsqueeze(1).unsqueeze(5)
         rbf_distances = rbf_distances ** 2
+        sigma = 1.0
+        rbf_distances = torch.exp(-rbf_distances / (2 * sigma ** 2))
         #### RBF PROBING HAMMING DISTANCE
         x = torch.mean(rbf_distances,dim=-1)
         x = self.act(self.compress(x)).squeeze(1)
-        x = self.NCA(x,spiking_probabilities)
+        x,nca_var = self.NCA(x,spiking_probabilities)
         x =  self.compress_NCA_out(x)
-        r = x[: , 0 ,:].view(self.batch_size,self.in_scale,self.in_scale)
-        g = x[: , 1, :].view(self.batch_size,self.in_scale,self.in_scale)
-        b = x[: , 2, :].view(self.batch_size,self.in_scale,self.in_scale)
-        a = x[: , 3, :].view(self.batch_size,self.in_scale,self.in_scale)
-        s = x[: , 4, :].view(self.batch_size,self.in_scale,self.in_scale)
+        r = x[: , 0 ,:, :]
+        g = x[: , 1, :, :]
+        b = x[: , 2, :, :]
+        a = x[: , 3, :, :]
+        s = x[: , 4, :, :]
         deepS = r, g, b, a, s
-        torch.cuda.current_stream().synchronize()
-        t_stop = time.perf_counter()
+        #torch.cuda.current_stream().synchronize()
+        #t_stop = time.perf_counter()
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         self.batch_size = old_batch_size
-        return r, g, b, a, s, deepS
+        return r, g, b, a, s, deepS,nca_var
 
     @staticmethod
     def binary(x, bits):

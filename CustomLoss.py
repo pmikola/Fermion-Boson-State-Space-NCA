@@ -3,7 +3,7 @@ from torch import nn
 from geomloss import SamplesLoss
 
 
-class CustomLoss(torch.nn.Module):
+class CustomLoss(nn.Module):
     def __init__(self,device):
         super().__init__()
         self.loss_alpha = nn.MSELoss(reduction='none')
@@ -15,7 +15,7 @@ class CustomLoss(torch.nn.Module):
         loss = self.loss_alpha(pred, data)
         return loss
 
-    def gradient_penalty(self, model, lambda_gp=1, epsilon=1e-9, epsilon_large=1e1, epsilon_small=5e-4):
+    def gradient_penalty(self, model, lambda_gp=1, epsilon=1e-9, epsilon_large=2e0, epsilon_small=5e-3):
         grad_norms_large = []
         grad_norms_small = []
         for name, param in model.named_parameters():

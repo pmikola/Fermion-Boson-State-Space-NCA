@@ -689,7 +689,7 @@ class teacher(nn.Module):
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
 
             t_start = time.perf_counter()
-            pred_r, pred_g, pred_b, pred_a, pred_s, deppS = self.model(dataset,spiking_probabilities)
+            pred_r, pred_g, pred_b, pred_a, pred_s, _,_ = self.model(dataset,spiking_probabilities)
             t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -820,7 +820,7 @@ class teacher(nn.Module):
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 max_norm = 1.
-                nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
+                #nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
                 optimizer.step()
                 # if (epoch + 1) % 5 == 0:
 
@@ -859,18 +859,17 @@ class teacher(nn.Module):
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
                     #print(gloss)
                     g_val_loss = np.sum(np.gradient(val_loss_recent_history))
-                    if g_val_loss > 1e2:
-                        reiterate_data = 0
-                    if gloss > 1e2:
+
+                    if gloss > 1e2 or g_val_loss > 1e2:
                         grad_counter = 0
                     else:
                         grad_counter += 1
                     # NOTE: lowering lr for  better performance and reset lr within conditions
-                    if grad_counter == 3 or reiterate_data == 0:
+                    if grad_counter == 20 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.995
+                            param_group['lr'] = param_group['lr'] * 0.99
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
-                                param_group['lr'] = 1e-2
+                                param_group['lr'] = 1e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
@@ -921,7 +920,7 @@ class teacher(nn.Module):
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
                          criterion,
                          norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS,nca_var = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1053,7 +1052,7 @@ class teacher(nn.Module):
         t = t.squeeze(1)
         t_1 = t_1.squeeze(1)
         # Solution for learning and maintaining of the proper color and other element space
-        bandwidth = torch.tensor(0.1).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
+        bandwidth = torch.tensor(0.5).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
         bins = 255  # Note: 255 values
         r_out = torch.flatten(r_out, start_dim=1)
         pred_r = torch.flatten(pred_r, start_dim=1)
@@ -1099,12 +1098,12 @@ class teacher(nn.Module):
 
         # Note: Deep Supervision Loss
         rres, gres, bres, ares, sres = deepS
-        dpSWeight = 0.5
-        rres_target = torch.rand_like(rres)+rres-0.5
-        gres_target = torch.rand_like(gres)+gres-0.5
-        bres_target = torch.rand_like(bres)+bres-0.5
-        ares_target = torch.rand_like(ares)+ares-0.5
-        sres_target = torch.rand_like(sres)+sres-0.5
+        dpSWeight = 1
+        rres_target = (torch.rand_like(rres)+rres)*0.5
+        gres_target = (torch.rand_like(gres)+gres)*0.5
+        bres_target = (torch.rand_like(bres)+bres)*0.5
+        ares_target = (torch.rand_like(ares)+ares)*0.5
+        sres_target = (torch.rand_like(sres)+sres)*0.5
         loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
             f.mse_loss(rres, rres_target),
             f.mse_loss(gres, gres_target),
@@ -1135,15 +1134,18 @@ class teacher(nn.Module):
         rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
-        A, B, C, D, E, F, G, H, I, J = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3,1.  # Note: loss weights for Custom
-        # A, B, C, D, E, F, G, H, I = 1e1, 1e1, 3e1, 5e2, 5e2, 5e2, 1e-1, 5e-1, 5.  # Note: loss weights for MSE
-        # A, B, C, D, E, F, G, H, I = 0.2, 0.2, 0.85, 2e2, 2e2, 5e1, 1e-1, 1., 5.,1.  # Note: loss weights for Sinkhorn
+        # NCA Criticality loss
+        target_variance = 0.25
+        critical_loss = (nca_var - target_variance) ** 2
 
-        loss_weights = (A, B, C, D, E, F, G, H, I)
+        #A, B, C, D, E, F, G, H, I, J, K = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3, 1., 5.
+        A, B, C, D, E, F, G, H, I, J, K = 1., 1., 1., 1., 1., 1e4, 1., 1., 1., 1., 1.
+
+        loss_weights = (A, B, C, D, E, F, G, H, I,J)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss)  # Attention: Aggregate all losses here
+                ssim_val, gradient_penalty_loss, critical_loss.mean())  # Attention: Aggregate all losses here
 
         weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
         num_losses = len(weighted_losses)
@@ -1158,8 +1160,8 @@ class teacher(nn.Module):
         dispersion_loss = std_between_losses / mean_between_losses
         # print(gradient_penalty_loss[0])
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, dispersion_loss)
-        loss_weights = (A, B, C, D, E, F, G, H, I, J)
+                ssim_val, gradient_penalty_loss, critical_loss,dispersion_loss)
+        loss_weights = (A, B, C, D, E, F, G, H, I, J, K)
 
         # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
         #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
@@ -1167,8 +1169,8 @@ class teacher(nn.Module):
         #       E * diff_fft_loss.mean().item(), "<-diff_fft_loss: E", F * hist_loss.mean().item(), "<-hist_loss: F",
         #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
         #       H * ssim_val.mean().item(),
-        #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",
-        #       dispersion_loss.mean().item() * J, "<- dispersion loss: J")
+        #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",critical_loss.mean().item() * J, "<- critical loss: J",
+        #       dispersion_loss.mean().item() * K, "<- dispersion loss: K")
 
         final_loss, i = 0., 0
         for losses in LOSS:
