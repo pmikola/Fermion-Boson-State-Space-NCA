@@ -45,7 +45,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
                 if m.bias is not None:
                     m.bias.data.fill_(0.00)
             elif isinstance(m, nn.Parameter):
-                m.data.normal_(mean=0.0, std=0.1)
+                m.data.normal_(mean=0.0, std=1.)
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
