@@ -581,7 +581,7 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 60, 300
+        x, y = 70, 450
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
