@@ -19,14 +19,15 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
         self.modes = 32
-        self.rbf_probes = nn.Parameter(torch.FloatTensor(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim).uniform_(-1., 1.), requires_grad=True).to(self.device)
+        self.rbf_probes = nn.Parameter(torch.rand(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim), requires_grad=True).to(self.device)
+        # torch.nn.init.xavier_uniform_(self.rbf_probes)
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
-        self.gate = nn.Parameter(torch.rand(1)).to(self.device)
+        #self.gate = nn.Parameter(torch.rand(1), requires_grad=True).to(self.device)
         self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=3,stride=1,padding=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.NCA = NCA(5,self.nca_steps,self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=1)
+        self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -44,8 +45,6 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
                 if m.bias is not None:
                     m.bias.data.fill_(0.00)
-            elif isinstance(m, nn.Parameter):
-                m.data.normal_(mean=0.0, std=1.)
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
@@ -88,29 +87,24 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         data = torch.cat([r,g,b,a,s],dim=1)
         #### HDC ENCODING
         input_dim = data.shape[1]
-        sparsity= 1.
-        num_nonzero_elements = int(sparsity * input_dim * self.hdc_dim)
-        non_zero_indices = torch.randint(0, input_dim * self.hdc_dim, (num_nonzero_elements,), device=self.device)
-        signs = torch.randint(0, 2, (num_nonzero_elements,), device=self.device,dtype=torch.int32) * 2 - 1
-        hdc_projection_matrix = torch.zeros(self.batch_size,input_dim, self.hdc_dim, device=self.device)
-        hdc_projection_matrix.view(-1)[non_zero_indices] = signs.float()
+        hdc_projection_matrix = torch.rand(self.batch_size,input_dim, self.hdc_dim, device=self.device,requires_grad=True)* 2 - 1
         time_in = meta_input_h5
         time_out = meta_output_h5
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
         time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
         time_encoded = self.compress_time(time_encoded)
-        data = data * (1 - self.gate) + time_encoded * self.gate
+        data = data + time_encoded
         #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
         #### RBF PROBING HAMMING DISTANCE
         data_projection = torch.einsum('bchw,bkn->bkhw',data,hdc_projection_matrix)
         rbf_distances = self.rbf_probes - data_projection.unsqueeze(1).unsqueeze(5)
         rbf_distances = rbf_distances ** 2
         sigma = 1.0
-        rbf_distances = torch.exp(-rbf_distances / (2 * sigma ** 2))
+        #rbf_distances = torch.exp(-rbf_distances / (2 * sigma ** 2))
         #### RBF PROBING HAMMING DISTANCE
         x = torch.mean(rbf_distances,dim=-1)
         x = self.act(self.compress(x)).squeeze(1)
-        x,nca_var = self.NCA(x,spiking_probabilities)
+        x,nca_var = self.NCA(data,spiking_probabilities)
         x =   self.act(self.compress_NCA_out(x))
         r = self.r(x).squeeze(1)
         g = self.g(x).squeeze(1)
@@ -134,7 +128,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
     def meta_encoding(self,meta_in,meta_out, dim, max_time_step):
         pos_in = meta_in / max_time_step
         pos_out = meta_out / max_time_step
-        pe = torch.zeros(self.batch_size,dim).to(self.device)
+        pe = torch.zeros(self.batch_size,dim,requires_grad=True).to(self.device)
         for i in range(dim):
             angle_in = pos_in / (10000 ** ((2 * (i // 2)) / dim))
             angle_out = pos_out / (10000 ** ((2 * (i // 2)) / dim))

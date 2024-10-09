@@ -566,13 +566,14 @@ class teacher(nn.Module):
         t = 0.
         ims = []
         fig = plt.figure(figsize=(10, 6))
-        grid = (1, 3)
+        grid = (2, 3)
         ax1 = plt.subplot2grid(grid, (0, 0))
         ax2 = plt.subplot2grid(grid, (0, 1))
         ax3 = plt.subplot2grid(grid, (0, 2))
+        ax4 = plt.subplot2grid(grid, (1, 0),colspan=3)
         # ax3 = plt.subplot2grid(grid, (1, 0))
         # ax4 = plt.subplot2grid(grid, (1, 1))
-        for ax in [ax1, ax2, ax3]:
+        for ax in [ax1, ax2, ax3,ax4]:
             ax.set_axis_off()
 
         for i in range(0, fuel_slices.shape[0] - 1):
@@ -688,9 +689,10 @@ class teacher(nn.Module):
                        meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
 
-            t_start = time.perf_counter()
-            pred_r, pred_g, pred_b, pred_a, pred_s, _,_ = self.model(dataset,spiking_probabilities)
-            t_pred = time.perf_counter()
+            with torch.no_grad():
+                t_start = time.perf_counter()
+                pred_r, pred_g, pred_b, pred_a, pred_s, _,_ = self.model(dataset,spiking_probabilities)
+                t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
 
@@ -738,7 +740,19 @@ class teacher(nn.Module):
 
             prediction = np.stack((r_v_pred, g_v_pred, b_v_pred), axis=2)
             ground_truth = np.stack((r_v_true, g_v_true, b_v_true), axis=2)
+            weights_anim = torch.zeros(0)
+            for param in self.model.parameters():
+                param = torch.flatten(param,start_dim=0)
+                weights_anim = torch.cat([weights_anim,param.cpu()])
 
+            x,y = 30,150
+            target_len = x*y
+            if target_len > weights_anim.shape[0]:
+                n = target_len-weights_anim.shape[0]
+                wfilling = torch.full((n,),-1.)
+                weights_anim = torch.cat([weights_anim,wfilling])
+
+            weights_anim = weights_anim.view(x,y).detach().cpu().numpy()
             title_pred = ax1.set_title("Prediction")
             title_true = ax2.set_title("Ground Truth")
             title_rms = ax3.set_title("rms")
@@ -749,7 +763,8 @@ class teacher(nn.Module):
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
 
-            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, title_pred, title_true, title_rms])
+            w_anim = ax4.imshow(weights_anim,cmap='RdBu')
+            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_anim, title_pred, title_true, title_rms])
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
         ani.save("flame_animation.gif")
         fig.colorbar(rms_anim, ax=ax3)
@@ -811,7 +826,6 @@ class teacher(nn.Module):
                 t_start = time.perf_counter()
                 model_output = self.model(dataset,spiking_probabilities)
                 t_pred = time.perf_counter()
-
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
@@ -831,7 +845,7 @@ class teacher(nn.Module):
                         val_loss = self.loss_calculation(self.model, val_idx, val_model_output, self.data_input_val,
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
-                    self.model.train()
+                self.model.train()
 
                 self.train_loss.append(loss.item())
                 self.val_loss.append(val_loss.item())
@@ -1135,7 +1149,7 @@ class teacher(nn.Module):
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
         # NCA Criticality loss
-        target_variance = 0.25
+        target_variance = 0.5
         critical_loss = (nca_var - target_variance) ** 2
 
         #A, B, C, D, E, F, G, H, I, J, K = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3, 1., 5.

@@ -36,7 +36,7 @@ t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 criterion = CustomLoss(device)
-optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=False)
+optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-6, amsgrad=False)
 
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch
