@@ -7,9 +7,9 @@ class NCA(nn.Module):
         super(NCA, self).__init__()
         self.device = device
         self.num_steps =num_steps
-        self.nca_layer_1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=(1, 1), stride=1)
-        self.nca_layer_3 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=(3, 3),stride=1,padding=(1, 1))
-        self.nca_layer_3_dil = nn.Conv2d(in_channels=in_channels,out_channels=in_channels, kernel_size=(3, 3), dilation=2,padding=2)
+        self.nca_layer_1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=1, stride=1)
+        self.nca_layer_3 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=3,stride=1,padding=1)
+        self.nca_layer_3_dil = nn.Conv2d(in_channels=in_channels,out_channels=in_channels, kernel_size=3, dilation=2,padding=2)
         #self.nca_layer_5 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=(5, 5),stride=1,padding=(2, 2))
         #self.nca_layer_7 = nn.Conv2d(in_channels=in_channels,out_channels=in_channels,kernel_size=(7, 7),stride=1,padding=(3, 3))
         self.nca_fusion = nn.Conv2d(in_channels=2*in_channels,out_channels=in_channels,kernel_size=1,stride=1,padding=0)

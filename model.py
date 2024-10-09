@@ -19,11 +19,14 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
         self.modes = 32
-        self.rbf_probes = nn.Parameter(torch.rand(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim), requires_grad=True).to(self.device)
-        # torch.nn.init.xavier_uniform_(self.rbf_probes)
+        #self.rbf_probes = nn.Parameter(torch.rand(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim), requires_grad=True).to(self.device)
+        #torch.nn.init.xavier_uniform_(self.rbf_probes)
+        #self.hdc_projection_matrix = nn.Parameter(torch.rand(1,5, self.hdc_dim, device=self.device,requires_grad=True)* 2 - 1)
+        #torch.nn.init.xavier_uniform_(self.hdc_projection_matrix)
+
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
         #self.gate = nn.Parameter(torch.rand(1), requires_grad=True).to(self.device)
-        self.compress = nn.Conv3d(in_channels=self.rbf_dim,out_channels=1,kernel_size=3,stride=1,padding=1)
+        self.compress = nn.Conv3d(in_channels=self.rbf_dim*self.hdc_dim,out_channels=self.rbf_dim,kernel_size=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.NCA = NCA(5,self.nca_steps,self.device)
@@ -87,30 +90,19 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         data = torch.cat([r,g,b,a,s],dim=1)
         #### HDC ENCODING
         input_dim = data.shape[1]
-        hdc_projection_matrix = torch.rand(self.batch_size,input_dim, self.hdc_dim, device=self.device,requires_grad=True)* 2 - 1
         time_in = meta_input_h5
         time_out = meta_output_h5
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
         time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
         time_encoded = self.compress_time(time_encoded)
         data = data + time_encoded
-        #### HDC ENCODING -> ~30 us per first frame (so probably much faster)
-        #### RBF PROBING HAMMING DISTANCE
-        data_projection = torch.einsum('bchw,bkn->bkhw',data,hdc_projection_matrix)
-        rbf_distances = self.rbf_probes - data_projection.unsqueeze(1).unsqueeze(5)
-        rbf_distances = rbf_distances ** 2
-        sigma = 1.0
-        #rbf_distances = torch.exp(-rbf_distances / (2 * sigma ** 2))
-        #### RBF PROBING HAMMING DISTANCE
-        x = torch.mean(rbf_distances,dim=-1)
-        x = self.act(self.compress(x)).squeeze(1)
         x,nca_var = self.NCA(data,spiking_probabilities)
-        x =   self.act(self.compress_NCA_out(x))
-        r = self.r(x).squeeze(1)
-        g = self.g(x).squeeze(1)
-        b = self.b(x).squeeze(1)
-        a = self.a(x).squeeze(1)
-        s = self.s(x).squeeze(1)
+        x = self.act(self.compress_NCA_out(x))
+        r = self.r(x).squeeze()
+        g = self.g(x).squeeze()
+        b = self.b(x).squeeze()
+        a = self.a(x).squeeze()
+        s = self.s(x).squeeze()
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()

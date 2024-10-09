@@ -251,8 +251,8 @@ class teacher(nn.Module):
             idx_output = random.choice(range(0, fuel_slices.shape[0]))
             offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
             offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in + offset_x
-            central_point_y_out = central_point_y_in + offset_y
+            central_point_x_out = central_point_x_in #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
+            central_point_y_out = central_point_y_in #+ offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -573,9 +573,21 @@ class teacher(nn.Module):
         ax4 = plt.subplot2grid(grid, (1, 0),colspan=3)
         # ax3 = plt.subplot2grid(grid, (1, 0))
         # ax4 = plt.subplot2grid(grid, (1, 1))
+
         for ax in [ax1, ax2, ax3,ax4]:
             ax.set_axis_off()
+        weights_anim = torch.zeros(0)
+        for param in self.model.parameters():
+            param = torch.flatten(param, start_dim=0)
+            weights_anim = torch.cat([weights_anim, param.cpu()])
 
+        x, y = 50, 350
+        target_len = x * y
+        if target_len > weights_anim.shape[0]:
+            n = target_len - weights_anim.shape[0]
+            wfilling = torch.full((n,), -1.)
+            weights_anim = torch.cat([weights_anim, wfilling])
+        w_stat = weights_anim.view(x,y).detach().cpu().numpy()
         for i in range(0, fuel_slices.shape[0] - 1):
             idx_input = i
             idx_output = i + 1
@@ -740,19 +752,7 @@ class teacher(nn.Module):
 
             prediction = np.stack((r_v_pred, g_v_pred, b_v_pred), axis=2)
             ground_truth = np.stack((r_v_true, g_v_true, b_v_true), axis=2)
-            weights_anim = torch.zeros(0)
-            for param in self.model.parameters():
-                param = torch.flatten(param,start_dim=0)
-                weights_anim = torch.cat([weights_anim,param.cpu()])
 
-            x,y = 30,150
-            target_len = x*y
-            if target_len > weights_anim.shape[0]:
-                n = target_len-weights_anim.shape[0]
-                wfilling = torch.full((n,),-1.)
-                weights_anim = torch.cat([weights_anim,wfilling])
-
-            weights_anim = weights_anim.view(x,y).detach().cpu().numpy()
             title_pred = ax1.set_title("Prediction")
             title_true = ax2.set_title("Ground Truth")
             title_rms = ax3.set_title("rms")
@@ -763,11 +763,12 @@ class teacher(nn.Module):
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
 
-            w_anim = ax4.imshow(weights_anim,cmap='RdBu')
-            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_anim, title_pred, title_true, title_rms])
+            w_static = ax4.imshow(w_stat,cmap='RdBu')
+            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_static, title_pred, title_true, title_rms])
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
         ani.save("flame_animation.gif")
         fig.colorbar(rms_anim, ax=ax3)
+        fig.colorbar(w_static, ax=ax4)
         plt.show()
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
