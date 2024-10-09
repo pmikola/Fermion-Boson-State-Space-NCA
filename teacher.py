@@ -581,7 +581,7 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 50, 350
+        x, y = 60, 300
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
@@ -1150,11 +1150,11 @@ class teacher(nn.Module):
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
         # NCA Criticality loss
-        target_variance = 0.5
+        target_variance = 0.49
         critical_loss = (nca_var - target_variance) ** 2
 
         #A, B, C, D, E, F, G, H, I, J, K = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3, 1., 5.
-        A, B, C, D, E, F, G, H, I, J, K = 1., 1., 1., 1., 1., 1e4, 1., 1., 1., 1., 1.
+        A, B, C, D, E, F, G, H, I, J, K = 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.
 
         loss_weights = (A, B, C, D, E, F, G, H, I,J)
         criterion.batch_size = value_loss.shape[0]

@@ -23,14 +23,14 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         #torch.nn.init.xavier_uniform_(self.rbf_probes)
         #self.hdc_projection_matrix = nn.Parameter(torch.rand(1,5, self.hdc_dim, device=self.device,requires_grad=True)* 2 - 1)
         #torch.nn.init.xavier_uniform_(self.hdc_projection_matrix)
-
         self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
         #self.gate = nn.Parameter(torch.rand(1), requires_grad=True).to(self.device)
-        self.compress = nn.Conv3d(in_channels=self.rbf_dim*self.hdc_dim,out_channels=self.rbf_dim,kernel_size=1)
+        #self.compress = nn.Conv3d(in_channels=self.rbf_dim*self.hdc_dim,out_channels=self.rbf_dim,kernel_size=1)
+        self.uplift = nn.Conv2d(in_channels=5, out_channels=15, kernel_size=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
-        self.NCA = NCA(5,self.nca_steps,self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=5,out_channels=5,kernel_size=3,stride=1,padding=1)
+        self.NCA = NCA(15,self.nca_steps,self.device)
+        self.compress_NCA_out = nn.Conv2d(in_channels=15,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -88,15 +88,14 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         a = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s = structure_input.unsqueeze(1)
         data = torch.cat([r,g,b,a,s],dim=1)
-        #### HDC ENCODING
-        input_dim = data.shape[1]
         time_in = meta_input_h5
         time_out = meta_output_h5
         time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
         time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
-        time_encoded = self.compress_time(time_encoded)
-        data = data + time_encoded
-        x,nca_var = self.NCA(data,spiking_probabilities)
+        time_encoded =  self.act(self.compress_time(time_encoded))
+        data = data * time_encoded
+        x = self.act(self.uplift(data))
+        x,nca_var = self.NCA(x,spiking_probabilities)
         x = self.act(self.compress_NCA_out(x))
         r = self.r(x).squeeze()
         g = self.g(x).squeeze()
