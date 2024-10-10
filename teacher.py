@@ -20,6 +20,7 @@ import torch.nn.functional as f
 
 class teacher(nn.Module):
     def __init__(self, model, device):
+        # TODO: NOT MACIEK
         super(teacher, self).__init__()
         #self.t = None
         self.validation_dataset = None
