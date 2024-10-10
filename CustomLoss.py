@@ -15,7 +15,7 @@ class CustomLoss(nn.Module):
         loss = self.loss_alpha(pred, data)
         return loss
 
-    def gradient_penalty(self, model, lambda_gp=1, epsilon=1e-9, epsilon_large=2e0, epsilon_small=5e-3):
+    def gradient_penalty(self, model, lambda_gp=0.1, epsilon=1e-9, epsilon_large=3e0, epsilon_small=2e-1):
         grad_norms_large = []
         grad_norms_small = []
         for name, param in model.named_parameters():

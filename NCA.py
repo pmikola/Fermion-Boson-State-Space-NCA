@@ -15,7 +15,7 @@ class NCA(nn.Module):
         self.nca_fusion = nn.Conv2d(in_channels=4*in_channels,out_channels=in_channels,kernel_size=1,stride=1,padding=0)
         self.layer_norm_1 = nn.LayerNorm([in_channels, 15, 15])
         self.act = nn.ELU(alpha=1.0)
-        # self.act = nn.Tanh()
+        # self.act = nn.GELU()
         self.step_param = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.residual_weights = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
@@ -26,7 +26,7 @@ class NCA(nn.Module):
         dx_3_dil = self.act(self.nca_layer_3_dil(x))
         dx_5 = self.act(self.nca_layer_5(x))
         dx_7 = self.act(self.nca_layer_7(x))
-        x = torch.cat([dx_3, dx_3_dil,dx_5,dx_7], dim=1)
+        x = torch.cat([dx_3,dx_3_dil,dx_5,dx_7], dim=1)
         x = self.act(self.nca_fusion(x))
         for i in range(self.num_steps):
             dx = self.act(self.layer_norm_1(self.nca_layer_1(x)))

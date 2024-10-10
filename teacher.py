@@ -190,7 +190,7 @@ class teacher(nn.Module):
             if create_val_dataset == 1:
                 noise_mod = 0.
             else:
-                noise_mod = 1 / (1 + self.epoch)
+                noise_mod = 1.
             if noise_flag < 3:
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
@@ -370,7 +370,7 @@ class teacher(nn.Module):
                     choose_diffrent_frame = 1
 
             mod = 4
-            if self.epoch > self.num_of_epochs * 0.03 or create_val_dataset == 1:
+            if self.epoch > self.num_of_epochs * 0.5 or create_val_dataset == 1:
                 pass
             else:
                 data_in_cnz = torch.count_nonzero(data_input_subslice)
@@ -581,11 +581,11 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 70, 450
+        x, y = 465, 1000
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
-            wfilling = torch.full((n,), -1.)
+            wfilling = torch.full((n,), 0.)
             weights_anim = torch.cat([weights_anim, wfilling])
         w_stat = weights_anim.view(x,y).detach().cpu().numpy()
         for i in range(0, fuel_slices.shape[0] - 1):
@@ -703,7 +703,7 @@ class teacher(nn.Module):
 
             with torch.no_grad():
                 t_start = time.perf_counter()
-                pred_r, pred_g, pred_b, pred_a, pred_s, _,_ = self.model(dataset,spiking_probabilities)
+                pred_r, pred_g, pred_b, pred_a, pred_s, _,_,_ = self.model(dataset,spiking_probabilities)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -935,7 +935,7 @@ class teacher(nn.Module):
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
                          criterion,
                          norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS,nca_var = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS,nca_var,loss_weights = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1154,7 +1154,7 @@ class teacher(nn.Module):
         critical_loss = (nca_var - target_variance) ** 2
 
         #A, B, C, D, E, F, G, H, I, J, K = 1., 1., 5e2, 2e2, 2e2, 5e3, 5., 5., 1e3, 1., 5.
-        A, B, C, D, E, F, G, H, I, J, K = 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.
+        A, B, C, D, E, F, G, H, I, J, K = loss_weights
 
         loss_weights = (A, B, C, D, E, F, G, H, I,J)
         criterion.batch_size = value_loss.shape[0]

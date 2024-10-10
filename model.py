@@ -18,19 +18,16 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
+        self.loss_weights = nn.Parameter(torch.ones(11))
         self.modes = 32
-        #self.rbf_probes = nn.Parameter(torch.rand(self.rbf_dim,5,self.in_scale,self.in_scale, self.hdc_dim), requires_grad=True).to(self.device)
-        #torch.nn.init.xavier_uniform_(self.rbf_probes)
-        #self.hdc_projection_matrix = nn.Parameter(torch.rand(1,5, self.hdc_dim, device=self.device,requires_grad=True)* 2 - 1)
-        #torch.nn.init.xavier_uniform_(self.hdc_projection_matrix)
-        self.compress_time = nn.Conv2d(in_channels=self.modes, out_channels=5, kernel_size=1)
-        #self.gate = nn.Parameter(torch.rand(1), requires_grad=True).to(self.device)
-        #self.compress = nn.Conv3d(in_channels=self.rbf_dim*self.hdc_dim,out_channels=self.rbf_dim,kernel_size=1)
-        self.uplift = nn.Conv2d(in_channels=5, out_channels=15, kernel_size=1)
+        self.uplift_meta_0 = nn.Linear(5*self.modes,10*self.modes)
+        self.uplift_meta_1 = nn.Linear(10*self.modes, 5 * self.in_scale ** 2)
+        self.compress_time = nn.Conv2d(in_channels=5, out_channels=20,kernel_size=1)
+        self.uplift_data = nn.Conv2d(in_channels=5, out_channels=20, kernel_size=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
-        self.NCA = NCA(15,self.nca_steps,self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=15,out_channels=5,kernel_size=3,stride=1,padding=1)
+        self.NCA = NCA(20,self.nca_steps,self.device)
+        self.compress_NCA_out = nn.Conv2d(in_channels=20,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -88,13 +85,16 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         a = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s = structure_input.unsqueeze(1)
         data = torch.cat([r,g,b,a,s],dim=1)
-        time_in = meta_input_h5
-        time_out = meta_output_h5
-        time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
-        time_encoded = time_encoded.unsqueeze(2).unsqueeze(3).expand(-1, -1, data.shape[-2], data.shape[-1])
-        time_encoded =  self.act(self.compress_time(time_encoded))
-        data = data * time_encoded
-        x = self.act(self.uplift(data))
+        time_in = meta_input_h2
+        time_out = meta_output_h2
+        #time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
+        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out],dim=-1)
+        meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
+        meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
+
+        meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)
+        meta_embeddings =  self.act(self.compress_time(meta_uplifted))
+        x = self.act(self.uplift_data(data)) * meta_embeddings
         x,nca_var = self.NCA(x,spiking_probabilities)
         x = self.act(self.compress_NCA_out(x))
         r = self.r(x).squeeze()
@@ -108,7 +108,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         self.batch_size = old_batch_size
-        return r, g, b, a, s, deepS,nca_var
+        return r, g, b, a, s, deepS,nca_var,self.loss_weights
 
     @staticmethod
     def binary(x, bits):
