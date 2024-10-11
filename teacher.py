@@ -770,7 +770,6 @@ class teacher(nn.Module):
         plt.show()
 
     def reconstruction_loss(self,criterion, device):
-        rms = 0.
         folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
                         'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
         data_tensor = []
