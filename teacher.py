@@ -1410,7 +1410,7 @@ class teacher(nn.Module):
         #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
         #       H * ssim_val.mean().item(),
         #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",critical_loss.mean().item() * J, "<- critical loss: J",
-        #       dispersion_loss.mean().item() * K, "<- dispersion loss: K")
+        #       rec_loss.item()*K, "<- reconstruction loss: K",dispersion_loss.mean().item() * L, "<- dispersion loss: L")
 
         final_loss, i = 0., 0
         for losses in LOSS:
