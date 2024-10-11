@@ -18,16 +18,17 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.loss_weights = nn.Parameter(torch.ones(11))
+        self.loss_weights = nn.Parameter(torch.ones(12))
         self.modes = 32
         self.uplift_meta_0 = nn.Linear(5*self.modes,10*self.modes)
         self.uplift_meta_1 = nn.Linear(10*self.modes, 5 * self.in_scale ** 2)
-        self.compress_time = nn.Conv2d(in_channels=5, out_channels=20,kernel_size=1)
-        self.uplift_data = nn.Conv2d(in_channels=5, out_channels=20, kernel_size=1)
+        self.compress_time = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
+        self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=1)
         self.nca_steps = nca_steps
-        self.act = nn.ELU(alpha=1.0)
-        self.NCA = NCA(20,self.nca_steps,self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=20,out_channels=5,kernel_size=3,stride=1,padding=1)
+        self.act = nn.ELU(alpha=2.0)
+        # self.act = nn.GELU()
+        self.NCA = NCA(self.hdc_dim,self.nca_steps,self.device)
+        self.compress_NCA_out = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -62,19 +63,8 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
          meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
          meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = din
         if data_input.shape[0] != self.batch_size:
-            self.batch_size = data_input.shape[0] * old_batch_size
-            din = [data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
-                   meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
-                   meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out]
-            stacked_vars = []
-            for var in din:
-                permuted_var = var.permute(1, 0, *range(2, var.ndimension()))
-                stacked_var = permuted_var.reshape(-1, *var.shape[2:])
-                stacked_vars.append(stacked_var)
-            (data_input, structure_input, meta_input_h1, meta_input_h2,
-             meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary,
-             meta_output_h1, meta_output_h2, meta_output_h3, meta_output_h4,
-             meta_output_h5, noise_var_out) = stacked_vars
+            self.batch_size = data_input.shape[0]
+
 
         #################################################################
         # s = torch.flatten(structure_input,start_dim=1)
@@ -85,17 +75,16 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         a = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s = structure_input.unsqueeze(1)
         data = torch.cat([r,g,b,a,s],dim=1)
-        time_in = meta_input_h2
-        time_out = meta_output_h2
-        #time_encoded = self.meta_encoding(time_in,time_out, self.modes, self.last_frame)
+        time_in,time_out = meta_input_h2,meta_output_h2
+
         meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out],dim=-1)
         meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
         meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
-
         meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)
         meta_embeddings =  self.act(self.compress_time(meta_uplifted))
-        x = self.act(self.uplift_data(data)) * meta_embeddings
-        x,nca_var = self.NCA(x,spiking_probabilities)
+
+        x = self.act(self.uplift_data(data))
+        x,nca_var = self.NCA(x,meta_embeddings,spiking_probabilities)
         x = self.act(self.compress_NCA_out(x))
         r = self.r(x).squeeze()
         g = self.g(x).squeeze()
