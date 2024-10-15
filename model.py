@@ -7,9 +7,9 @@ import torch.nn as nn
 from NCA import NCA
 
 
-class HyperRadialNeuralFourierCelularAutomata(nn.Module):
+class Fermionic_Bosonic_Space_State_NCA(nn.Module):
     def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_dim,nca_steps, device):
-        super(HyperRadialNeuralFourierCelularAutomata, self).__init__()
+        super(Fermionic_Bosonic_Space_State_NCA, self).__init__()
         self.last_frame = None
         self.device = device
         self.no_frame_samples = no_frame_samples

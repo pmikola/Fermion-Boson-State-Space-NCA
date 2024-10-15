@@ -468,6 +468,10 @@ class teacher(nn.Module):
 
     def examine(self, criterion, device, plot=0):
         self.model.load_state_dict(torch.load('model.pt'))
+        self.model.NCA.fermion_features = None
+        self.model.NCA.boson_features = None
+        no_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print("Final model no params:", no_params)
         spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
         if self.data_tensor is None:
             folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
@@ -596,7 +600,7 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 500, 1000
+        x, y =1000, 4600
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
@@ -779,12 +783,12 @@ class teacher(nn.Module):
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
 
             w_static = ax4.imshow(w_stat,cmap='RdBu')
-
             ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_static, title_pred, title_true, title_rms])
-        ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif")
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
+        ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
+        ani.save("flame_animation.gif")
+
         plt.show()
 
     def reconstruction_loss(self,criterion, device):
@@ -839,6 +843,9 @@ class teacher(nn.Module):
             b_idx = rgb_idx[::3] + 2  # [frame_samples]
             alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  # [frame_samples]
             fuel_slices = self.data_tensor[fdens_idx]
+            self.w = fuel_slices.shape[1]
+            self.h = fuel_slices.shape[2]
+            self.n_frames = fuel_slices.shape[0]
             min_val = fuel_slices.min()
             max_val = fuel_slices.max()
             self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
@@ -847,6 +854,7 @@ class teacher(nn.Module):
             self.b_slices = self.data_tensor[b_idx]
             self.alpha_slices = self.data_tensor[alpha_idx]
             self.meta_binary_slices = self.meta_binary[fdens_idx]
+        else:pass
 
         # Note: IDX preparation
         central_points_x = np.arange(self.input_window_size, self.w - self.input_window_size + 1)

@@ -5,8 +5,8 @@ from os import path
 import numpy as np
 import torch
 from torch import nn
-
-from model import HyperRadialNeuralFourierCelularAutomata
+from performer_pytorch import Performer
+from model import Fermionic_Bosonic_Space_State_NCA
 from teacher import teacher
 from flameEngine import flame as fl
 from CustomLoss import CustomLoss
@@ -29,7 +29,10 @@ hdc_dim = 10
 rbf_probes_number = 5
 nca_steps = 10
 
-model = HyperRadialNeuralFourierCelularAutomata(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
+model = Fermionic_Bosonic_Space_State_NCA(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
+no_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print("Number of parameters in trained architecture :", no_params)
+
 torch.save(model.state_dict(), 'model.pt')
 t = teacher(model, device)
 t.seed_setter(2024)
@@ -52,7 +55,7 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip * 2, criterion, optimizer ,device, learning=1,
-                     num_epochs=20)
+                     num_epochs=200)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
 t.visualize_lerning()
