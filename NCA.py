@@ -70,6 +70,7 @@ class NCA(nn.Module):
                 boson_kernels = self.boson_features(reshaped_energy_spectrum)
                 fermion_kernels = self.project_fermions(fermion_kernels.flatten(start_dim=1))
                 boson_kernels = self.project_bosons(boson_kernels.flatten(start_dim=1))
+                # TODO: Make fermions orthogonal to each other
                 #fermion_kernels, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
                 boson_kernels=boson_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
