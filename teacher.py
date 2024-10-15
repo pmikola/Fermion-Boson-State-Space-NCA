@@ -311,6 +311,7 @@ class teacher(nn.Module):
                                              meta_fuel_cut_off_time_in, meta_igni_time_in,
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
 
+
             # Note : Output data
             fuel_subslice_out = self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
                 noise_variance_out * torch.rand_like(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
@@ -385,6 +386,9 @@ class teacher(nn.Module):
                     choose_diffrent_frame = 1
 
             mod = 4
+
+
+
             if self.epoch > self.num_of_epochs * 0.5 or create_val_dataset == 1:
                 pass
             else:
@@ -932,6 +936,11 @@ class teacher(nn.Module):
             gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
             bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
             asout.append(self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+
+        # if create_val_dataset == 0:
+        #     self.data_input_val
+        #     self.data_output_val
+        # TODO: Exlude validation dataset from training dataset
 
         fuel_subslice_in = torch.stack(fsin, dim=0)
         r_subslice_in = torch.stack(rsin, dim=0)

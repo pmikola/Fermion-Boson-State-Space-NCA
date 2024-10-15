@@ -32,8 +32,8 @@ class NCA(nn.Module):
         self.fermion_features = Performer(dim=self.fermion_number,dim_head=self.fermion_number, depth=1, heads=self.fermion_number)
         self.boson_features = Performer(dim=self.boson_number,dim_head=self.boson_number, depth=1, heads=self.boson_number)
 
-        self.project_fermions = nn.Linear(in_features=in_channels*15*15,out_features=self.fermion_number*self.num_steps*self.kernel_size**2)
-        self.project_bosons = nn.Linear(in_features=in_channels*15*15,out_features=self.boson_number*self.num_steps*self.kernel_size**2)
+        self.project_fermions = nn.Linear(in_features=in_channels*15*15,out_features=self.fermion_number*self.fermion_number*self.kernel_size**2)
+        self.project_bosons = nn.Linear(in_features=in_channels*15*15,out_features=self.boson_number*self.fermion_number*self.kernel_size**2)
 
         self.lnorm_fermion = nn.LayerNorm([in_channels, 15, 15])
         self.lnorm_boson = nn.LayerNorm([in_channels, 15, 15])
@@ -49,10 +49,8 @@ class NCA(nn.Module):
         self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.residual_weights = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
 
-
     def nca_update(self, x,meta_embeddings,spiking_probabilities):
         nca_var = torch.zeros((x.shape[0],self.num_steps), requires_grad=True).to(self.device)
-        x = dct_3d(x)
         x_1 = self.act(self.nca_layer_1(x))
         x_3 = self.act(self.nca_layer_3(x))
         x_3_dil = self.act(self.nca_layer_3_dil(x))
@@ -63,15 +61,16 @@ class NCA(nn.Module):
         x_13 = self.act(self.nca_layer_13(x))
         x_15 = self.act(self.nca_layer_15(x))
         x = x_1 + x_3 + x_3_dil + x_5 + x_7 + x_9 + x_11 + x_13 + x_15 # Note: Bosonic response (superposition)
-        energy_spectrum = self.act(self.nca_fusion(x))+meta_embeddings
+        energy_spectrum = dct_3d(x)
+        energy_spectrum = self.act(self.nca_fusion(energy_spectrum))+meta_embeddings
         for i in range(self.num_steps):
             if self.training:
                 reshaped_energy_spectrum = energy_spectrum.contiguous().reshape(energy_spectrum.shape[0], -1, energy_spectrum.shape[1])
                 fermion_kernels = self.fermion_features(reshaped_energy_spectrum)
                 boson_kernels = self.boson_features(reshaped_energy_spectrum)
                 fermion_kernels = self.project_fermions(fermion_kernels.flatten(start_dim=1))
-                boson_kernels = self.project_fermions(boson_kernels.flatten(start_dim=1))
-                #fermion_kernels_ortho, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
+                boson_kernels = self.project_bosons(boson_kernels.flatten(start_dim=1))
+                #fermion_kernels, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
                 boson_kernels=boson_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
                 self.learned_fermion_kernels[i].data = fermion_kernels
@@ -88,7 +87,7 @@ class NCA(nn.Module):
                 energy_spectrum = (energy_spectrum + energy_spectrum * self.step_param[i] +
                      torch.rand_like(x) * spiking_probabilities[i]*self.spike_scale[i] +
                      energy_spectrum*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
-            energy_spectrum = dct.idct_3d(x)
+        energy_spectrum = dct.idct_3d(x)
         return energy_spectrum,nca_var
 
     def forward(self, x,meta_embeddings,spiking_probabilities):

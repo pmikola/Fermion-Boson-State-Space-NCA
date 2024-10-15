@@ -64,8 +64,6 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
          meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = din
         if data_input.shape[0] != self.batch_size:
             self.batch_size = data_input.shape[0]
-
-
         #################################################################
         # s = torch.flatten(structure_input,start_dim=1)
         # data = torch.flatten(data_input,start_dim=1)
