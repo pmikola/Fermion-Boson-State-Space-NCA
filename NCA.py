@@ -76,18 +76,17 @@ class NCA(nn.Module):
                 self.learned_fermion_kernels[i].data = fermion_kernels
                 self.learned_boson_kernels[i].data = boson_kernels
             else:
-                with torch.no_grad():
-                    fermion_kernels = self.learned_fermion_kernels[i]
-                    boson_kernels = self.learned_boson_kernels[i]
+                fermion_kernels = self.learned_fermion_kernels[i]
+                boson_kernels = self.learned_boson_kernels[i]
                 fermionic_response = self.fermionic_NCA(energy_spectrum,weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response = self.bosonic_NCA(fermion_energy_states, weights=boson_kernels)
                 energy_spectrum = self.act(self.lnorm_boson(bosonic_response))
                 nca_var[:,i] = torch.var(fermionic_response+bosonic_response, dim=[1 ,2, 3])
                 energy_spectrum = (energy_spectrum + energy_spectrum * self.step_param[i] +
-                     torch.rand_like(x) * spiking_probabilities[i]*self.spike_scale[i] +
+                     torch.rand_like(energy_spectrum) * spiking_probabilities[i]*self.spike_scale[i] +
                      energy_spectrum*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
-        energy_spectrum = dct.idct_3d(x)
+        energy_spectrum = dct.idct_3d(energy_spectrum)
         return energy_spectrum,nca_var
 
     def forward(self, x,meta_embeddings,spiking_probabilities):
