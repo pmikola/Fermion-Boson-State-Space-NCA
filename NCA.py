@@ -74,11 +74,21 @@ class NCA(nn.Module):
                 #fermion_kernels, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
                 boson_kernels=boson_kernels.mean(dim=0).view(self.fermion_number,self.in_channels, self.kernel_size, self.kernel_size)
+
+                fermionic_response = self.fermionic_NCA(energy_spectrum, weights=fermion_kernels)
+                fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
+                bosonic_response = self.bosonic_NCA(fermion_energy_states, weights=boson_kernels)
+                energy_spectrum = self.act(self.lnorm_boson(bosonic_response))
+                nca_var[:, i] = torch.var(fermionic_response + bosonic_response, dim=[1, 2, 3])
+                energy_spectrum = (energy_spectrum + energy_spectrum * self.step_param[i] +
+                                   torch.rand_like(energy_spectrum) * spiking_probabilities[i] * self.spike_scale[i] +
+                                   energy_spectrum * self.residual_weights[i])  # Note: Progressing NCA dynamics by dx
                 self.learned_fermion_kernels[i].data = fermion_kernels
                 self.learned_boson_kernels[i].data = boson_kernels
             else:
-                fermion_kernels = self.learned_fermion_kernels[i]
-                boson_kernels = self.learned_boson_kernels[i]
+                with torch.no_grad():
+                    fermion_kernels = self.learned_fermion_kernels[i]
+                    boson_kernels = self.learned_boson_kernels[i]
                 fermionic_response = self.fermionic_NCA(energy_spectrum,weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response = self.bosonic_NCA(fermion_energy_states, weights=boson_kernels)
