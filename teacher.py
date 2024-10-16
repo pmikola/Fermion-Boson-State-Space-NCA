@@ -924,6 +924,8 @@ class teacher(nn.Module):
         bsout = []
         asout = []
 
+
+
         for ii in range(len(x_idx_start)):
             fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
             rsin.append(self.r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
@@ -1411,8 +1413,8 @@ class teacher(nn.Module):
         critical_loss = (nca_var - target_variance) ** 2
 
         # Reconstruction loss
-        reconstruction_loss = self.reconstruction_loss(criterion,self.device)
-        rec_loss = reconstruction_loss.mean()
+        #reconstruction_loss = self.reconstruction_loss(criterion,self.device)
+        rec_loss = 1.#reconstruction_loss.mean()
 
         A, B, C, D, E, F, G, H, I, J, K,L = loss_weights
 

@@ -33,17 +33,17 @@ class NCA(nn.Module):
         # self.particle_features = Performer(dim=self.particle_number, dim_head=self.particle_number, depth=1, heads=self.particle_number)
 
         self.fermion_features = Linformer(
-            dim=self.particle_number,
+            dim=self.fermion_number,
             seq_len=15 * 15,
             depth=1,
-            heads=self.particle_number//2,
+            heads=self.fermion_number//2,
             k=32
         )
         self.boson_features = Linformer(
-            dim=self.particle_number,
+            dim=self.boson_number,
             seq_len=15 * 15,
             depth=1,
-            heads=self.particle_number//2,
+            heads=self.boson_number//2,
             k=32
         )
 
@@ -54,9 +54,9 @@ class NCA(nn.Module):
         self.lnorm_boson = nn.LayerNorm([in_channels, 15, 15])
 
         self.learned_fermion_kernels = nn.ParameterList(
-            [nn.Parameter(torch.randn(self.particle_number,in_channels, self.kernel_size, self.kernel_size), requires_grad=False) for _ in range(num_steps)])
+            [nn.Parameter(torch.randn(self.fermion_number,in_channels, self.kernel_size, self.kernel_size), requires_grad=False) for _ in range(num_steps)])
         self.learned_boson_kernels = nn.ParameterList(
-            [nn.Parameter(torch.randn(self.particle_number,in_channels, self.kernel_size, self.kernel_size), requires_grad=False) for _ in range(num_steps)])
+            [nn.Parameter(torch.randn(self.boson_number,in_channels, self.kernel_size, self.kernel_size), requires_grad=False) for _ in range(num_steps)])
 
         self.act = nn.ELU(alpha=2.)
         # self.act = nn.GELU()
