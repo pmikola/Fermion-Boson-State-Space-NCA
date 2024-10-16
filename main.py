@@ -31,7 +31,7 @@ nca_steps = 10
 
 model = Fermionic_Bosonic_Space_State_NCA(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
 no_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print("Number of parameters in trained architecture :", no_params)
+print("Number of parameters in trained architecture :", round(no_params*1e-6,2),' [M]')
 
 torch.save(model.state_dict(), 'model.pt')
 t = teacher(model, device)

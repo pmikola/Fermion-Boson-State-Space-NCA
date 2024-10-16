@@ -604,7 +604,7 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y =1000, 4600
+        x, y =1000, 4700
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
@@ -1092,19 +1092,19 @@ class teacher(nn.Module):
 
 
                 optimizer.zero_grad(set_to_none=True)
-                loss.backward()
+                loss.backward(retain_graph=True)
                 max_norm = 1.
                 #nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
                 optimizer.step()
                 # if (epoch + 1) % 5 == 0:
-                self.model.eval()
+
                 if self.validation_dataset is not None:
                     with torch.no_grad():
                         val_model_output = self.model(self.validation_dataset,spiking_probabilities)
                         val_loss = self.loss_calculation(self.model, val_idx, val_model_output, self.data_input_val,
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
-                self.model.train()
+
                 self.train_loss.append(loss.item())
                 self.val_loss.append(val_loss.item())
 
@@ -1457,11 +1457,6 @@ class teacher(nn.Module):
                 final_loss += loss_weights[i] * torch.mean(losses)
             i += 1
             return final_loss
-
-
-
-
-
 
     @staticmethod
     def seed_setter(seed):
