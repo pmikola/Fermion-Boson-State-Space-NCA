@@ -477,6 +477,7 @@ class teacher(nn.Module):
         no_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Final model no params:", no_params)
         spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+        # spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
         if self.data_tensor is None:
             folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
                             'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
@@ -795,8 +796,9 @@ class teacher(nn.Module):
 
         plt.show()
 
-    def reconstruction_loss(self,criterion, device):
-        spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+    def reconstruction_loss(self,criterion, device,no_patches):
+        # spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+        spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
         if self.data_tensor is None:
             folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
                             'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
@@ -861,8 +863,9 @@ class teacher(nn.Module):
         else:pass
 
         # Note: IDX preparation
-        central_points_x = np.arange(self.input_window_size, self.w - self.input_window_size + 1)
-        central_points_y = np.arange(self.input_window_size, self.h - self.input_window_size + 1)
+        number_of_patches = no_patches
+        central_points_x = np.random.randint(self.input_window_size, self.w - self.input_window_size + 1,size=number_of_patches)
+        central_points_y = np.random.randint(self.input_window_size, self.h - self.input_window_size + 1,size=number_of_patches)
 
         central_points_x_pos = central_points_x + self.input_window_size
         central_points_x_neg = central_points_x - self.input_window_size
@@ -874,24 +877,20 @@ class teacher(nn.Module):
 
         central_points_x_binary = []
         central_points_y_binary = []
-        v = int(central_points_x_pos.shape[0] / self.model.in_scale + 1)
-        h = int(central_points_y_pos.shape[0] / self.model.in_scale + 1)
-        j = 0
+        v = int(central_points_x_pos.shape[0])
+        h = int(central_points_y_pos.shape[0])
         for m in range(0, v):
-            k = 0
             for n in range(0, h):
-                wx_range = np.array(range(int(central_points_x_neg[j]), int(central_points_x_pos[j]) + 2))
+                wx_range = np.array(range(int(central_points_x_neg[m]), int(central_points_x_pos[m]) + 2))
                 windows_x.append(wx_range)
-                central_point_x_binary_pre = "{0:010b}".format(central_points_x[j])
+                central_point_x_binary_pre = "{0:010b}".format(central_points_x[m])
                 central_points_x_binary.append(
                     torch.tensor([torch.tensor(int(d), dtype=torch.int8) for d in central_point_x_binary_pre]))
-                wy_range = np.array(range(int(central_points_y_neg[k]), int(central_points_y_pos[k]) + 2))
+                wy_range = np.array(range(int(central_points_y_neg[n]), int(central_points_y_pos[n]) + 2))
                 windows_y.append(wy_range)
-                central_point_y_binary_pre = "{0:010b}".format(central_points_y[k])
+                central_point_y_binary_pre = "{0:010b}".format(central_points_y[n])
                 central_points_y_binary.append(
                     torch.tensor([torch.tensor(int(d), dtype=torch.int8) for d in central_point_y_binary_pre]))
-                k += self.model.in_scale
-            j += self.model.in_scale
 
         central_points_x_binary = torch.tensor(np.array(central_points_x_binary))
         central_points_y_binary = torch.tensor(np.array(central_points_y_binary))
@@ -906,7 +905,6 @@ class teacher(nn.Module):
         x_idx_end = np.array([sublist[-1] for sublist in x_idx])
         y_idx_start = np.array([sublist[0] for sublist in y_idx])
         y_idx_end = np.array([sublist[-1] for sublist in y_idx])
-
         #for i in range(0, fuel_slices.shape[0] - 1):
         idx_input = random.randint(0,self.n_frames - 2)
         idx_output = idx_input + 1
@@ -927,17 +925,21 @@ class teacher(nn.Module):
 
 
         for ii in range(len(x_idx_start)):
-            fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            rsin.append(self.r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            gsin.append(self.g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            bsin.append(self.b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            asin.append(self.alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+            d_shape = self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]].shape
+            if  d_shape[0] != 15 or d_shape[1] != 15:
+                pass
+            else:
+                fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsin.append(self.r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsin.append(self.g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsin.append(self.b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asin.append(self.alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
-            fsout.append(self.fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            asout.append(self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                fsout.append(self.fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asout.append(self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
         # if create_val_dataset == 0:
         #     self.data_input_val
@@ -1326,7 +1328,7 @@ class teacher(nn.Module):
         t = t.squeeze(1)
         t_1 = t_1.squeeze(1)
         # Solution for learning and maintaining of the proper color and other element space
-        bandwidth = torch.tensor(0.5).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
+        bandwidth = torch.tensor(0.1).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
         bins = 255  # Note: 255 values
         r_out = torch.flatten(r_out, start_dim=1)
         pred_r = torch.flatten(pred_r, start_dim=1)
@@ -1409,16 +1411,16 @@ class teacher(nn.Module):
         ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
 
         # NCA Criticality loss
-        target_variance = 15*15*5
-        critical_loss = (nca_var - target_variance) ** 2
+        target_variance = 0.49
+        critical_loss = (nca_var - target_variance) * 0.1#** 2
 
         # Reconstruction loss
-        #reconstruction_loss = self.reconstruction_loss(criterion,self.device)
-        rec_loss = 1.#reconstruction_loss.mean()
+        reconstruction_loss = self.reconstruction_loss(criterion,self.device,8)
+        rec_loss = reconstruction_loss.mean()
 
         A, B, C, D, E, F, G, H, I, J, K,L = loss_weights
 
-        loss_weights = (A, B, C, D, E, F, G, H, I,J, L)
+        loss_weights = (A, B, C, D, E, F*1e6, G, H, I,J, L)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
@@ -1438,7 +1440,7 @@ class teacher(nn.Module):
         # print(gradient_penalty_loss[0])
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
                 ssim_val, gradient_penalty_loss, critical_loss,rec_loss,dispersion_loss)
-        loss_weights = (A, B, C, D, E, F, G, H, I, J, K, L)
+        loss_weights = (A, B, C, D*1e2, E*1e2, F*1e5, G, H, I, J, K, L)
 
         # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
         #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
@@ -1451,6 +1453,9 @@ class teacher(nn.Module):
 
         final_loss, i = 0., 0
         for losses in LOSS:
+            # if i == 0 or i ==2 or i == 3 or i == 4  or i == 6 or i == 7 or i == 8 or i == 9 or i == 10 :
+            #     pass
+            # else:
             if pred_r.shape[0] != self.batch_size:
                 n = int(pred_r.shape[0] / self.batch_size)
                 losses = torch.chunk(losses, n, dim=0)
@@ -1458,7 +1463,7 @@ class teacher(nn.Module):
             else:
                 final_loss += loss_weights[i] * torch.mean(losses)
             i += 1
-            return final_loss
+        return final_loss
 
     @staticmethod
     def seed_setter(seed):

@@ -75,7 +75,7 @@ class NCA(nn.Module):
         x_11 = self.act(self.nca_layer_11(x))
         x_13 = self.act(self.nca_layer_13(x))
         x_15 = self.act(self.nca_layer_15(x))
-        x = x_1 + x_3 + x_3_dil + x_5 + x_7 + x_9 + x_11 + x_13 + x_15 # Note: Bosonic response (superposition)
+        x = x_1 + x_3 + x_3_dil + x_5 + x_7 + x_9 + x_11 + x_13 + x_15 # Note: Bosonic behavior (superposition)
         #energy_spectrum = dct_3d(x)
         energy_spectrum = self.act(self.nca_fusion(x))+meta_embeddings
         for i in range(self.num_steps):
@@ -104,10 +104,10 @@ class NCA(nn.Module):
             fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
             bosonic_response = self.bosonic_NCA(fermion_energy_states, weights=boson_kernels)
             bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-            nca_var[:,i] = torch.var(fermionic_response+bosonic_response, dim=[1 ,2, 3])
             energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
                  torch.rand_like(bosonic_energy_states) * spiking_probabilities[i]*self.spike_scale[i] +
                  bosonic_energy_states*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
+            nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3])
         #energy_spectrum = dct.idct_3d(energy_spectrum)
         return energy_spectrum,nca_var
 
