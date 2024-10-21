@@ -8,7 +8,9 @@ from statistics import mean
 
 from torch import nn
 
-import ssim
+# import ssim
+from pytorch_msssim import SSIM, MS_SSIM
+
 import kornia
 import numpy as np
 import torch
@@ -35,7 +37,8 @@ class teacher(nn.Module):
         self.meta_binary = None
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
-        self.ssim_loss = ssim.MS_SSIM(data_range=1., channel=5, use_padding=True, window_size=1).to(self.device)
+        self.ssim_loss = SSIM(data_range=2., channel=5,nonnegative_ssim=True,K=(0.01, 0.04),win_size=7).to(self.device)
+
 
         self.data_input = None
         self.structure_input = None  #torch.zeros((self.model.batch_size,self.model.in_scale,self.model.in_scale),requires_grad=True)
@@ -244,7 +247,7 @@ class teacher(nn.Module):
                 noise_variance_out_binary = torch.tensor(np.array(noise_variance_out_binary)).to(self.device)
 
             # Note: Flow Matching OT Noise gen
-            fmot_coef = torch.rand(size=(1,))
+            fmot_coef = torch.rand(size=(1,))#torch.ones(size=(1,))
             fmot_coef_binary = ''.join(f'{c:08b}' for c in np.float32(fmot_coef).tobytes())
             fmot_coef_binary = [int(fmot_coef_binary[i], 2) for i in range(0, len(fmot_coef_binary), 1)]
             fmot_coef_binary = torch.tensor(np.array(fmot_coef_binary)).to(self.device)
@@ -266,8 +269,8 @@ class teacher(nn.Module):
             idx_output = random.choice(range(0, self.n_frames))
             offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
             offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
-            central_point_y_out = central_point_y_in #+ offset_y
+            central_point_x_out = central_point_x_in  #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
+            central_point_y_out = central_point_y_in  #+ offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -282,7 +285,8 @@ class teacher(nn.Module):
 
             # Note : Input data
             fuel_subslice_in = self.fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+                noise_variance_in * torch.rand_like(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
+                    self.device),
                 nan=0.0)
             r_subslice_in = self.r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
                 noise_variance_in * torch.rand_like(self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
@@ -294,7 +298,8 @@ class teacher(nn.Module):
                 noise_variance_in * torch.rand_like(self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0)
             alpha_subslice_in = self.alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+                noise_variance_in * torch.rand_like(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
+                    self.device),
                 nan=0.0)
             data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=0)
 
@@ -311,16 +316,18 @@ class teacher(nn.Module):
                                              meta_fuel_cut_off_time_in, meta_igni_time_in,
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
 
-
             # Note : Output data
             fuel_subslice_out = self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+                noise_variance_out * torch.rand_like(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
             r_subslice_out = self.r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(self.r_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+                noise_variance_out * torch.rand_like(self.r_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
             g_subslice_out = self.g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(self.g_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+                noise_variance_out * torch.rand_like(self.g_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
             b_subslice_out = self.b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
                 noise_variance_out * torch.rand_like(self.b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0)
@@ -386,8 +393,6 @@ class teacher(nn.Module):
                     choose_diffrent_frame = 1
 
             mod = 4
-
-
 
             if self.epoch > self.num_of_epochs * 0.5 or create_val_dataset == 1:
                 pass
@@ -472,8 +477,8 @@ class teacher(nn.Module):
 
     def examine(self, criterion, device, plot=0):
         self.model.load_state_dict(torch.load('model.pt'))
-        self.model.NCA.fermion_features = None
-        self.model.NCA.boson_features = None
+        # self.model.NCA.fermion_features = None
+        # self.model.NCA.boson_features = None
         no_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("Final model no params:", no_params)
         spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
@@ -538,8 +543,9 @@ class teacher(nn.Module):
             self.g_slices = self.data_tensor[g_idx]
             self.b_slices = self.data_tensor[b_idx]
             self.alpha_slices = self.data_tensor[alpha_idx]
-            self. meta_binary_slices = self.meta_binary[fdens_idx]
-        else:pass
+            self.meta_binary_slices = self.meta_binary[fdens_idx]
+        else:
+            pass
 
         # Note: IDX preparation
         central_points_x = np.arange(self.input_window_size, self.w - self.input_window_size + 1)
@@ -594,24 +600,24 @@ class teacher(nn.Module):
         ax1 = plt.subplot2grid(grid, (0, 0))
         ax2 = plt.subplot2grid(grid, (0, 1))
         ax3 = plt.subplot2grid(grid, (0, 2))
-        ax4 = plt.subplot2grid(grid, (1, 0),colspan=3)
+        ax4 = plt.subplot2grid(grid, (1, 0), colspan=3)
         # ax3 = plt.subplot2grid(grid, (1, 0))
         # ax4 = plt.subplot2grid(grid, (1, 1))
 
-        for ax in [ax1, ax2, ax3,ax4]:
+        for ax in [ax1, ax2, ax3, ax4]:
             ax.set_axis_off()
         weights_anim = torch.zeros(0)
         for param in self.model.parameters():
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y =1000, 4700
+        x, y = 1000, 4700
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
             wfilling = torch.full((n,), 0.)
             weights_anim = torch.cat([weights_anim, wfilling])
-        w_stat = weights_anim.view(x,y).detach().cpu().numpy()
+        w_stat = weights_anim.view(x, y).detach().cpu().numpy()
         for i in range(0, self.n_frames - 1):
             idx_input = i
             idx_output = i + 1
@@ -640,7 +646,8 @@ class teacher(nn.Module):
                 rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
                 gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
                 bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                asout.append(self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asout.append(
+                    self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
             fuel_subslice_in = torch.stack(fsin, dim=0)
             r_subslice_in = torch.stack(rsin, dim=0)
@@ -656,7 +663,7 @@ class teacher(nn.Module):
             meta_ignition_temp_in = self.meta_binary_slices[idx_input][4]
 
             meta_viscosity_in = self.meta_binary_slices[idx_input][14]
-            meta_diff_in =self.meta_binary_slices[idx_input][15]
+            meta_diff_in = self.meta_binary_slices[idx_input][15]
             meta_input_subslice = torch.cat([meta_step_in, meta_fuel_initial_speed_in,
                                              meta_fuel_cut_off_time_in, meta_igni_time_in,
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
@@ -727,7 +734,7 @@ class teacher(nn.Module):
 
             with torch.no_grad():
                 t_start = time.perf_counter()
-                pred_r, pred_g, pred_b, pred_a, pred_s, _,_,_ = self.model(dataset,spiking_probabilities)
+                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _ = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -787,8 +794,8 @@ class teacher(nn.Module):
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
 
-            w_static = ax4.imshow(w_stat,cmap='RdBu')
-            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_static, title_pred, title_true, title_rms])
+            w_static = ax4.imshow(w_stat, cmap='RdBu')
+            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, w_static, title_pred, title_true, title_rms])
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
@@ -796,9 +803,9 @@ class teacher(nn.Module):
 
         plt.show()
 
-    def reconstruction_loss(self,criterion, device,no_patches):
-        # spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
-        spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
+    def reconstruction_loss(self, criterion, device, no_patches):
+        spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+        # spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
         if self.data_tensor is None:
             folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
                             'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
@@ -860,12 +867,15 @@ class teacher(nn.Module):
             self.b_slices = self.data_tensor[b_idx]
             self.alpha_slices = self.data_tensor[alpha_idx]
             self.meta_binary_slices = self.meta_binary[fdens_idx]
-        else:pass
+        else:
+            pass
 
         # Note: IDX preparation
         number_of_patches = no_patches
-        central_points_x = np.random.randint(self.input_window_size, self.w - self.input_window_size + 1,size=number_of_patches)
-        central_points_y = np.random.randint(self.input_window_size, self.h - self.input_window_size + 1,size=number_of_patches)
+        central_points_x = np.random.randint(self.input_window_size, self.w - self.input_window_size + 1,
+                                             size=number_of_patches)
+        central_points_y = np.random.randint(self.input_window_size, self.h - self.input_window_size + 1,
+                                             size=number_of_patches)
 
         central_points_x_pos = central_points_x + self.input_window_size
         central_points_x_neg = central_points_x - self.input_window_size
@@ -906,7 +916,7 @@ class teacher(nn.Module):
         y_idx_start = np.array([sublist[0] for sublist in y_idx])
         y_idx_end = np.array([sublist[-1] for sublist in y_idx])
         #for i in range(0, fuel_slices.shape[0] - 1):
-        idx_input = random.randint(0,self.n_frames - 2)
+        idx_input = random.randint(0, self.n_frames - 2)
         idx_output = idx_input + 1
 
         # Note : Input data
@@ -922,11 +932,9 @@ class teacher(nn.Module):
         bsout = []
         asout = []
 
-
-
         for ii in range(len(x_idx_start)):
             d_shape = self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]].shape
-            if  d_shape[0] != 15 or d_shape[1] != 15:
+            if d_shape[0] != 15 or d_shape[1] != 15:
                 pass
             else:
                 fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
@@ -939,7 +947,8 @@ class teacher(nn.Module):
                 rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
                 gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
                 bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                asout.append(self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asout.append(
+                    self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
         # if create_val_dataset == 0:
         #     self.data_input_val
@@ -955,7 +964,7 @@ class teacher(nn.Module):
         meta_step_in = self.meta_binary_slices[idx_input][0]
         meta_step_in_numeric = self.meta_tensor[idx_input][0]
         meta_fuel_initial_speed_in = self.meta_binary_slices[idx_input][1]
-        meta_fuel_cut_off_time_in =self. meta_binary_slices[idx_input][2]
+        meta_fuel_cut_off_time_in = self.meta_binary_slices[idx_input][2]
         meta_igni_time_in = self.meta_binary_slices[idx_input][3]
         meta_ignition_temp_in = self.meta_binary_slices[idx_input][4]
 
@@ -1004,7 +1013,6 @@ class teacher(nn.Module):
         meta_output_h5 = meta_step_out_numeric.repeat(data_input.shape[0], 1).squeeze(1)
         noise_var_out = torch.zeros((data_input.shape[0], 32))
 
-
         (data_input, structure_input, meta_input_h1, meta_input_h2,
          meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
          meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = \
@@ -1029,9 +1037,10 @@ class teacher(nn.Module):
                    meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                    meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
         pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _ = self.model(dataset, spiking_probabilities)
-        prediction = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s],dim=1)
-        ground_truth = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out, structure_output],dim=1)
-        rms = criterion(prediction ,ground_truth)
+        prediction = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s], dim=1)
+        ground_truth = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out, structure_output],
+                                 dim=1)
+        rms = criterion(prediction, ground_truth)
         return rms
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
@@ -1077,7 +1086,7 @@ class teacher(nn.Module):
                 else:
                     reiterate_counter += 1
 
-                m_idx = torch.arange(int(self.data_input.shape[0] / 2)) # TODO : Change to random selection
+                m_idx = torch.arange(int(self.data_input.shape[0] / 2))  # TODO : Change to random selection
 
                 dataset = (self.data_input[m_idx], self.structure_input[m_idx], self.meta_input_h1[m_idx],
                            self.meta_input_h2[m_idx],
@@ -1088,12 +1097,10 @@ class teacher(nn.Module):
 
                 spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
                 t_start = time.perf_counter()
-                model_output = self.model(dataset,spiking_probabilities)
+                model_output = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
-
-
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward(retain_graph=True)
@@ -1104,7 +1111,7 @@ class teacher(nn.Module):
 
                 if self.validation_dataset is not None:
                     with torch.no_grad():
-                        val_model_output = self.model(self.validation_dataset,spiking_probabilities)
+                        val_model_output = self.model(self.validation_dataset, spiking_probabilities)
                         val_loss = self.loss_calculation(self.model, val_idx, val_model_output, self.data_input_val,
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
@@ -1194,9 +1201,8 @@ class teacher(nn.Module):
         plt.show()
 
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
-                         criterion,
-                         norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS,nca_var,loss_weights = model_output
+                         criterion,norm='backward'):
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var, loss_weights = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1328,46 +1334,56 @@ class teacher(nn.Module):
         t = t.squeeze(1)
         t_1 = t_1.squeeze(1)
         # Solution for learning and maintaining of the proper color and other element space
-        bandwidth = torch.tensor(0.1).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
-        bins = 255  # Note: 255 values
+        bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
+        bins = 256  # Note: 256 values
         r_out = torch.flatten(r_out, start_dim=1)
         pred_r = torch.flatten(pred_r, start_dim=1)
-        bins_true = torch.linspace(r_out.min(), r_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_r.min().tolist(), pred_r.max().tolist(), bins).to(self.device)
-        r_true_hist = kornia.enhance.histogram(r_out, bins=bins_true, bandwidth=bandwidth)
-        r_pred_hist = kornia.enhance.histogram(pred_r, bins=bins_pred, bandwidth=bandwidth)
+        r_true_hist,_ = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth)
+        r_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth)
+        r_true_hist_max = r_true_hist.max()
+        r_true_hist = r_true_hist / (r_true_hist_max + 1e-9)
+        r_pred_hist_max = r_pred_hist.max()
+        r_pred_hist = r_pred_hist / (r_pred_hist_max + 1e-9)
         r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
 
         g_out = torch.flatten(g_out, start_dim=1)
         pred_g = torch.flatten(pred_g, start_dim=1)
-        bins_true = torch.linspace(g_out.min(), g_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_g.min().tolist(), pred_g.max().tolist(), bins).to(self.device)
-        g_true_hist = kornia.enhance.histogram(g_out, bins=bins_true, bandwidth=bandwidth)
-        g_pred_hist = kornia.enhance.histogram(pred_g, bins=bins_pred, bandwidth=bandwidth)
+        g_true_hist,_ = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth)
+        g_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth)
+        g_true_hist_max = g_true_hist.max()
+        g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
+        g_pred_hist_max = g_pred_hist.max()
+        g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
         g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
 
         b_out = torch.flatten(b_out, start_dim=1)
         pred_b = torch.flatten(pred_b, start_dim=1)
-        bins_true = torch.linspace(b_out.min(), b_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_b.min().tolist(), pred_b.max().tolist(), bins).to(self.device)
-        b_true_hist = kornia.enhance.histogram(b_out, bins=bins_true, bandwidth=bandwidth)
-        b_pred_hist = kornia.enhance.histogram(pred_b, bins=bins_pred, bandwidth=bandwidth)
+        b_true_hist,_ = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth)
+        b_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth)
+        b_true_hist_max = b_true_hist.max()
+        b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
+        b_pred_hist_max = b_pred_hist.max()
+        b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
         b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
 
         a_out = torch.flatten(a_out, start_dim=1)
         pred_a = torch.flatten(pred_a, start_dim=1)
-        bins_true = torch.linspace(a_out.min(), a_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_a.min().tolist(), pred_a.max().tolist(), bins).to(self.device)
-        a_true_hist = kornia.enhance.histogram(a_out, bins=bins_true, bandwidth=bandwidth)
-        a_pred_hist = kornia.enhance.histogram(pred_a, bins=bins_pred, bandwidth=bandwidth)
+        a_true_hist,_ = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth)
+        a_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth)
+        a_true_hist_max = a_true_hist.max()
+        a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
+        a_pred_hist_max = a_pred_hist.max()
+        a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
         a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
 
         s_out = torch.flatten(s_out, start_dim=1)
         pred_s = torch.flatten(pred_s, start_dim=1)
-        bins_true = torch.linspace(s_out.min(), s_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_s.min().tolist(), pred_s.max().tolist(), bins).to(self.device)
-        s_true_hist = kornia.enhance.histogram(s_out, bins=bins_true, bandwidth=bandwidth)
-        s_pred_hist = kornia.enhance.histogram(pred_s, bins=bins_pred, bandwidth=bandwidth)
+        s_true_hist,_ = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth)
+        s_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth)
+        s_true_hist_max = s_true_hist.max()
+        s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
+        s_pred_hist_max = s_pred_hist.max()
+        s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
         s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
         hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss, dim=1)
         # hist_loss = r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss
@@ -1375,20 +1391,20 @@ class teacher(nn.Module):
         # Note: Deep Supervision Loss
         rres, gres, bres, ares, sres = deepS
         dpSWeight = 1
-        rres_target = (torch.rand_like(rres)+rres)*0.5
-        gres_target = (torch.rand_like(gres)+gres)*0.5
-        bres_target = (torch.rand_like(bres)+bres)*0.5
-        ares_target = (torch.rand_like(ares)+ares)*0.5
-        sres_target = (torch.rand_like(sres)+sres)*0.5
+        rres_target = (torch.rand_like(rres) + rres) * 0.5
+        gres_target = (torch.rand_like(gres) + gres) * 0.5
+        bres_target = (torch.rand_like(bres) + bres) * 0.5
+        ares_target = (torch.rand_like(ares) + ares) * 0.5
+        sres_target = (torch.rand_like(sres) + sres) * 0.5
         loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
             f.mse_loss(rres, rres_target),
             f.mse_loss(gres, gres_target),
             f.mse_loss(bres, bres_target),
             f.mse_loss(ares, ares_target),
             f.mse_loss(sres, sres_target))
-        deepSLoss = torch.mean(loss_rres)* dpSWeight + torch.mean(loss_gres)* dpSWeight + torch.mean(loss_bres)* dpSWeight + torch.mean(loss_ares)* dpSWeight + torch.mean(loss_sres)* dpSWeight
+        deepSLoss = torch.mean(loss_rres) * dpSWeight + torch.mean(loss_gres) * dpSWeight + torch.mean(
+            loss_bres) * dpSWeight + torch.mean(loss_ares) * dpSWeight + torch.mean(loss_sres) * dpSWeight
         # deepSLoss = loss_x + loss_x_mod + loss_rgbas_prod + loss_rres + loss_gres + loss_bres + loss_ares + loss_sres
-
 
         # Note: SSIM Loss
         l = self.batch_size
@@ -1412,56 +1428,58 @@ class teacher(nn.Module):
 
         # NCA Criticality loss
         target_variance = 0.49
-        critical_loss = (nca_var - target_variance) * 0.1#** 2
+        normalized_nca_var = nca_var / torch.sum(nca_var, dim=1, keepdim=True)
+        critical_loss = torch.mean((normalized_nca_var - target_variance) ** 2)
 
         # Reconstruction loss
-        reconstruction_loss = self.reconstruction_loss(criterion,self.device,8)
+        reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
         rec_loss = reconstruction_loss.mean()
 
-        A, B, C, D, E, F, G, H, I, J, K,L = loss_weights
 
-        loss_weights = (A, B, C, D, E, F*1e6, G, H, I,J, L)
+        A, B, C, D, E, F, G, H, I, J, K, L = loss_weights
+
+        loss_weights = (A, B, C, D, E, F, G, H, I, J, L)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, critical_loss.mean(),rec_loss)  # Attention: Aggregate all losses here
+                ssim_val, gradient_penalty_loss, critical_loss.mean(), rec_loss)  # Attention: Aggregate all losses here
 
-        weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
-        num_losses = len(weighted_losses)
-        mse_matrix = torch.zeros((value_loss.shape[0], num_losses, num_losses)).to(self.device)
-        for i in range(num_losses):
-            for j in range(num_losses):
-                mse = (weighted_losses[i] - weighted_losses[j]) ** 2
-                mse_matrix[:, i, j] = mse
+        # weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
+        # num_losses = len(weighted_losses)
+        # mse_matrix = torch.zeros((value_loss.shape[0], num_losses, num_losses)).to(self.device)
+        # for i in range(num_losses):
+        #     for j in range(num_losses):
+        #         mse = (weighted_losses[i] - weighted_losses[j]) ** 2
+        #         mse_matrix[:, i, j] = mse
 
-        std_between_losses = mse_matrix.std(dim=(1, 2))
-        mean_between_losses = mse_matrix.mean(dim=(1, 2))
-        dispersion_loss = std_between_losses / mean_between_losses
+        # std_between_losses = mse_matrix.std(dim=(1, 2))
+        # mean_between_losses = mse_matrix.mean(dim=(1, 2))
+        dispersion_loss = torch.zeros(size=(1,)).to(self.device)#std_between_losses / mean_between_losses
         # print(gradient_penalty_loss[0])
         LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, critical_loss,rec_loss,dispersion_loss)
-        loss_weights = (A, B, C, D*1e2, E*1e2, F*1e5, G, H, I, J, K, L)
+                ssim_val, gradient_penalty_loss, critical_loss, rec_loss, dispersion_loss)
 
-        # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
-        #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
-        #       "<-fft_loss: D",
-        #       E * diff_fft_loss.mean().item(), "<-diff_fft_loss: E", F * hist_loss.mean().item(), "<-hist_loss: F",
-        #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
-        #       H * ssim_val.mean().item(),
-        #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",critical_loss.mean().item() * J, "<- critical loss: J",
-        #       rec_loss.item()*K, "<- reconstruction loss: K",dispersion_loss.mean().item() * L, "<- dispersion loss: L")
+        aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1., 1., 1., 5e2 ,5e2, 1e-4, 1., 5e1, 1, 5e1, 1, 1.
+
+        loss_weights = (A*aa, B*bb, C*cc, D * dd, E * ee, F * ff, G * gg, H * hh, I * ii, J * jj, K * kk, L * ll)
+
+        if self.epoch % 50 == 0:
+            print(A*aa * value_loss.mean().item(), "<- value_loss: A",
+                  B *bb * diff_loss.mean().item(),"<- diff_loss: B",
+                  C *cc * grad_loss.mean().item(), "<- grad_loss: C",
+                  D *dd * fft_loss.mean().item(),"<- fft_loss: D",
+                  E *ee * diff_fft_loss.mean().item(), "<- diff_fft_loss: E",
+                  F *ff * hist_loss.mean().item(), "<- hist_loss: F",
+                  G *gg * deepSLoss.mean().item(), "<- deepSLoss: G",
+                  H *hh * ssim_val.mean().item(),"<- ssim_val: H",
+                  I*ii*gradient_penalty_loss.mean().item() ,"<- gradient_penalty_loss: I",
+                  J*jj*critical_loss.mean().item(), "<- critical loss: J",
+                  K*kk*rec_loss.item(), "<- reconstruction loss: K",
+                  L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
 
         final_loss, i = 0., 0
         for losses in LOSS:
-            # if i == 0 or i ==2 or i == 3 or i == 4  or i == 6 or i == 7 or i == 8 or i == 9 or i == 10 :
-            #     pass
-            # else:
-            if pred_r.shape[0] != self.batch_size:
-                n = int(pred_r.shape[0] / self.batch_size)
-                losses = torch.chunk(losses, n, dim=0)
-                final_loss += torch.stack([loss_weights[i] * split.mean(dim=0) for split in losses])
-            else:
-                final_loss += loss_weights[i] * torch.mean(losses)
+            final_loss += loss_weights[i] * torch.mean(losses)
             i += 1
         return final_loss
 

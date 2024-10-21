@@ -24,7 +24,10 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.uplift_meta_1 = nn.Linear(10*self.modes, 5 * self.in_scale ** 2)
         self.compress_time = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=3,stride=1,padding=1)
-        # self.cross_correlate = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
+
+        self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
+        self.cross_correlate_out = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
+
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
@@ -83,10 +86,13 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         meta_embeddings =  self.act(self.compress_time(meta_uplifted))
 
         x = self.act(self.uplift_data(data))
-        # x = x.unsqueeze(1)
-        # x = self.act(self.cross_correlate(x))
-        # x = x.squeeze(1)
+        x = x.unsqueeze(1)
+        x = self.act(self.cross_correlate_in(x))
+        x = x.squeeze(1)
         x,nca_var = self.NCA(x,meta_embeddings,spiking_probabilities)
+        x = x.unsqueeze(1)
+        x = self.act(self.cross_correlate_out(x))
+        x = x.squeeze(1)
         x = self.act(self.compress_NCA_out(x))
 
         r = self.r(x).squeeze()

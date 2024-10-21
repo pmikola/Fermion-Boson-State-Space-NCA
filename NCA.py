@@ -81,7 +81,6 @@ class NCA(nn.Module):
         for i in range(self.num_steps):
             if self.training:
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], -1, energy_spectrum.shape[1])
-
                 fermion_kernels = self.fermion_features(reshaped_energy_spectrum)
                 fermion_kernels = fermion_kernels.flatten(start_dim=1)
 
@@ -93,7 +92,7 @@ class NCA(nn.Module):
                 # TODO: Make fermions orthogonal to each other
                 #fermion_kernels, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.particle_number,self.in_channels, self.kernel_size, self.kernel_size)
-                boson_kernels=boson_kernels.mean(dim=0).view(self.particle_number,self.in_channels, self.kernel_size, self.kernel_size)
+                boson_kernels = boson_kernels.mean(dim=0).view(self.particle_number,self.in_channels, self.kernel_size, self.kernel_size)
                 with torch.no_grad():
                     self.learned_fermion_kernels[i].copy_(fermion_kernels)
                     self.learned_boson_kernels[i].copy_(boson_kernels)
