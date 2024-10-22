@@ -95,11 +95,11 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = x.squeeze(1)
         x = self.act(self.compress_NCA_out(x))
 
-        r = self.r(x).squeeze()
-        g = self.g(x).squeeze()
-        b = self.b(x).squeeze()
-        a = self.a(x).squeeze()
-        s = self.s(x).squeeze()
+        r = torch.sigmoid(self.r(x).squeeze())
+        g = torch.sigmoid(self.g(x).squeeze())
+        b = torch.sigmoid(self.b(x).squeeze())
+        a = torch.sigmoid(self.a(x).squeeze())
+        s = torch.sigmoid(self.s(x).squeeze())
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()

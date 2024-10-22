@@ -114,6 +114,27 @@ class NCA(nn.Module):
         x,nca_var = self.nca_update(x,meta_embeddings,spiking_probabilities)
         return x,nca_var
 
+    def validate_channel_orthogonality(fermions):
+        batch_size, channels, k, k = fermions.shape
+        tensor_flattened = fermions.view(batch_size, channels, -1)
+        orthogonality_results = []
+        for b in range(batch_size):
+            channel_vectors = tensor_flattened[b]
+
+            dot_products = torch.mm(channel_vectors, channel_vectors.T)
+            identity_mask = torch.eye(channels, device=fermions.device)
+            off_diagonal_elements = dot_products * (1 - identity_mask)
+            mean_off_diagonal = torch.mean(torch.abs(off_diagonal_elements))
+            max_off_diagonal = torch.max(torch.abs(off_diagonal_elements))
+
+            orthogonality_results.append({
+                'mean_off_diagonal': mean_off_diagonal.item(),
+                'max_off_diagonal': max_off_diagonal.item()
+            })
+
+        return orthogonality_results
+
+
 class FermionConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3):
         super(FermionConvLayer, self).__init__()

@@ -37,7 +37,7 @@ class teacher(nn.Module):
         self.meta_binary = None
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
-        self.ssim_loss = SSIM(data_range=2., channel=5,nonnegative_ssim=True,K=(0.01, 0.04),win_size=7).to(self.device)
+        self.ssim_loss = SSIM(data_range=1., channel=5,nonnegative_ssim=True,K=(0.01, 0.1),win_size=7).to(self.device)
 
 
         self.data_input = None
@@ -1103,7 +1103,7 @@ class teacher(nn.Module):
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
                 optimizer.zero_grad(set_to_none=True)
-                loss.backward(retain_graph=True)
+                loss.backward()
                 max_norm = 1.
                 #nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
                 optimizer.step()
@@ -1131,7 +1131,7 @@ class teacher(nn.Module):
                     val_loss_recent_history = np.array(self.val_loss)[-10:-1]
                     mean_hist_losses = np.mean(loss_recent_history)
                     if loss_recent_history[-1] > loss_recent_history[-2] or loss_recent_history[-1] < \
-                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-3:
+                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-6:
                         reiterate_data = 1
                     else:
                         reiterate_counter = 0
@@ -1165,8 +1165,8 @@ class teacher(nn.Module):
                     t_epoch_current = epoch * t_epoch
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
-                        f'vL: {val_loss.item():.4f}, '
-                        f'mL: {loss.item():.4f}, '
+                        f'vL: {val_loss.item():.6f}, '
+                        f'mL: {loss.item():.6f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms]')
                     t = 0.
                     t_epoch = 0.
@@ -1257,19 +1257,19 @@ class teacher(nn.Module):
         # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
 
         # Note: Gradient loss
-        grad_r_true = torch.gradient(r_out, dim=[1])[0]
+        grad_r_true = torch.gradient(r_out)[0]
         grad_r_pred = torch.gradient(pred_r)[0]
         grad_r = criterion(t * grad_r_pred + t_1 * grad_r_true, grad_r_true)
-        grad_g_true = torch.gradient(g_out, dim=[1])[0]
+        grad_g_true = torch.gradient(g_out)[0]
         grad_g_pred = torch.gradient(pred_g)[0]
         grad_g = criterion(t * grad_g_pred + t_1 * grad_g_true, grad_g_true)
-        grad_b_true = torch.gradient(b_out, dim=[1])[0]
+        grad_b_true = torch.gradient(b_out)[0]
         grad_b_pred = torch.gradient(pred_b)[0]
         grad_b = criterion(t * grad_b_pred + t_1 * grad_b_true, grad_b_true)
-        grad_a_true = torch.gradient(a_out, dim=[1])[0]
+        grad_a_true = torch.gradient(a_out)[0]
         grad_a_pred = torch.gradient(pred_a)[0]
         grad_a = criterion(t * grad_a_pred + t_1 * grad_a_true, grad_a_true)
-        grad_s_true = torch.gradient(s_out, dim=[1])[0]
+        grad_s_true = torch.gradient(s_out)[0]
         grad_s_pred = torch.gradient(pred_s)[0]
         grad_s = criterion(t * grad_s_pred + t_1 * grad_s_true, grad_s_true)
 
@@ -1331,6 +1331,16 @@ class teacher(nn.Module):
         value_loss = torch.mean(loss_r + loss_g + loss_b + loss_alpha + loss_s, dim=[1, 2])
         # value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
 
+        # Note: Deep Supervision Loss cosine sim
+        rres, gres, bres, ares, sres = deepS
+        dpSWeight = 1.0
+        cosine_loss_rres = 1 - torch.nn.functional.cosine_similarity(rres.flatten(1), r_out.flatten(1), dim=1).mean()
+        cosine_loss_gres = 1 - torch.nn.functional.cosine_similarity(gres.flatten(1), g_out.flatten(1), dim=1).mean()
+        cosine_loss_bres = 1 - torch.nn.functional.cosine_similarity(bres.flatten(1), b_out.flatten(1), dim=1).mean()
+        cosine_loss_ares = 1 - torch.nn.functional.cosine_similarity(ares.flatten(1), a_out.flatten(1), dim=1).mean()
+        cosine_loss_sres = 1 - torch.nn.functional.cosine_similarity(sres.flatten(1), s_out.flatten(1), dim=1).mean()
+        deepSLoss = dpSWeight * (cosine_loss_rres + cosine_loss_gres + cosine_loss_bres + cosine_loss_ares + cosine_loss_sres) / 5
+
         t = t.squeeze(1)
         t_1 = t_1.squeeze(1)
         # Solution for learning and maintaining of the proper color and other element space
@@ -1340,71 +1350,52 @@ class teacher(nn.Module):
         pred_r = torch.flatten(pred_r, start_dim=1)
         r_true_hist,_ = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth)
         r_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth)
-        r_true_hist_max = r_true_hist.max()
-        r_true_hist = r_true_hist / (r_true_hist_max + 1e-9)
-        r_pred_hist_max = r_pred_hist.max()
-        r_pred_hist = r_pred_hist / (r_pred_hist_max + 1e-9)
+        # r_true_hist_max = r_true_hist.max()
+        # r_true_hist = r_true_hist / (r_true_hist_max + 1e-9)
+        # r_pred_hist_max = r_pred_hist.max()
+        # r_pred_hist = r_pred_hist / (r_pred_hist_max + 1e-9)
         r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
 
         g_out = torch.flatten(g_out, start_dim=1)
         pred_g = torch.flatten(pred_g, start_dim=1)
         g_true_hist,_ = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth)
         g_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth)
-        g_true_hist_max = g_true_hist.max()
-        g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
-        g_pred_hist_max = g_pred_hist.max()
-        g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
+        # g_true_hist_max = g_true_hist.max()
+        # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
+        # g_pred_hist_max = g_pred_hist.max()
+        # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
         g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
 
         b_out = torch.flatten(b_out, start_dim=1)
         pred_b = torch.flatten(pred_b, start_dim=1)
         b_true_hist,_ = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth)
         b_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth)
-        b_true_hist_max = b_true_hist.max()
-        b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
-        b_pred_hist_max = b_pred_hist.max()
-        b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
+        # b_true_hist_max = b_true_hist.max()
+        # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
+        # b_pred_hist_max = b_pred_hist.max()
+        # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
         b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
 
         a_out = torch.flatten(a_out, start_dim=1)
         pred_a = torch.flatten(pred_a, start_dim=1)
         a_true_hist,_ = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth)
         a_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth)
-        a_true_hist_max = a_true_hist.max()
-        a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
-        a_pred_hist_max = a_pred_hist.max()
-        a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
+        # a_true_hist_max = a_true_hist.max()
+        # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
+        # a_pred_hist_max = a_pred_hist.max()
+        # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
         a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
 
         s_out = torch.flatten(s_out, start_dim=1)
         pred_s = torch.flatten(pred_s, start_dim=1)
         s_true_hist,_ = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth)
         s_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth)
-        s_true_hist_max = s_true_hist.max()
-        s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
-        s_pred_hist_max = s_pred_hist.max()
-        s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
+        # s_true_hist_max = s_true_hist.max()
+        # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
+        # s_pred_hist_max = s_pred_hist.max()
+        # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
         s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
         hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss, dim=1)
-        # hist_loss = r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss
-
-        # Note: Deep Supervision Loss
-        rres, gres, bres, ares, sres = deepS
-        dpSWeight = 1
-        rres_target = (torch.rand_like(rres) + rres) * 0.5
-        gres_target = (torch.rand_like(gres) + gres) * 0.5
-        bres_target = (torch.rand_like(bres) + bres) * 0.5
-        ares_target = (torch.rand_like(ares) + ares) * 0.5
-        sres_target = (torch.rand_like(sres) + sres) * 0.5
-        loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
-            f.mse_loss(rres, rres_target),
-            f.mse_loss(gres, gres_target),
-            f.mse_loss(bres, bres_target),
-            f.mse_loss(ares, ares_target),
-            f.mse_loss(sres, sres_target))
-        deepSLoss = torch.mean(loss_rres) * dpSWeight + torch.mean(loss_gres) * dpSWeight + torch.mean(
-            loss_bres) * dpSWeight + torch.mean(loss_ares) * dpSWeight + torch.mean(loss_sres) * dpSWeight
-        # deepSLoss = loss_x + loss_x_mod + loss_rgbas_prod + loss_rres + loss_gres + loss_bres + loss_ares + loss_sres
 
         # Note: SSIM Loss
         l = self.batch_size
@@ -1428,8 +1419,8 @@ class teacher(nn.Module):
 
         # NCA Criticality loss
         target_variance = 0.49
-        normalized_nca_var = nca_var / torch.sum(nca_var, dim=1, keepdim=True)
-        critical_loss = torch.mean((normalized_nca_var - target_variance) ** 2)
+        normalized_nca_var = nca_var / torch.sum(nca_var, dim=1, keepdim=True) + 1e-6
+        critical_loss = torch.mean(torch.abs(target_variance - normalized_nca_var))
 
         # Reconstruction loss
         reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
@@ -1438,30 +1429,29 @@ class teacher(nn.Module):
 
         A, B, C, D, E, F, G, H, I, J, K, L = loss_weights
 
-        loss_weights = (A, B, C, D, E, F, G, H, I, J, L)
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, critical_loss.mean(), rec_loss)  # Attention: Aggregate all losses here
 
-        # weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
-        # num_losses = len(weighted_losses)
-        # mse_matrix = torch.zeros((value_loss.shape[0], num_losses, num_losses)).to(self.device)
-        # for i in range(num_losses):
-        #     for j in range(num_losses):
-        #         mse = (weighted_losses[i] - weighted_losses[j]) ** 2
-        #         mse_matrix[:, i, j] = mse
-
-        # std_between_losses = mse_matrix.std(dim=(1, 2))
-        # mean_between_losses = mse_matrix.mean(dim=(1, 2))
-        dispersion_loss = torch.zeros(size=(1,)).to(self.device)#std_between_losses / mean_between_losses
+        loss_tensor = torch.stack([A, B, C, D, E, F, G, H, I, J, K, L]).to(self.device)
+        mean_loss = torch.abs(torch.mean(loss_tensor))
+        variance_loss = torch.abs(torch.var(loss_tensor, unbiased=False))
+        dispersion_loss = variance_loss / (mean_loss+1e-6)
         # print(gradient_penalty_loss[0])
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
+        # Note: Normalisation of weights between each other
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, deepSLoss,
+                ssim_val, critical_loss, rec_loss)
+        loss_weights = (A, B, C, D, E, F, G, H, J, K )
+        total_weight = sum(loss_weights)+ 1e-4 * len(loss_weights)
+        dynamic_weights = [w / total_weight for w in loss_weights]
+        losses = (dynamic_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
+        (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, deepSLoss,
+         ssim_val, critical_loss, rec_loss) = losses
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,
                 ssim_val, gradient_penalty_loss, critical_loss, rec_loss, dispersion_loss)
 
-        aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1., 1., 1., 5e2 ,5e2, 1e-4, 1., 5e1, 1, 5e1, 1, 1.
-
-        loss_weights = (A*aa, B*bb, C*cc, D * dd, E * ee, F * ff, G * gg, H * hh, I * ii, J * jj, K * kk, L * ll)
+        aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1e3, 1e3, 1e4, 1e5,1e5, 1e-3, 1e3, 1e3, 1, 1e2, 1e4, 1.
+        loss_weights = (aa, bb, cc, dd, ee, hh, ii, jj, kk, ll)
+        final_loss = sum(loss_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
 
         if self.epoch % 50 == 0:
             print(A*aa * value_loss.mean().item(), "<- value_loss: A",
@@ -1477,10 +1467,6 @@ class teacher(nn.Module):
                   K*kk*rec_loss.item(), "<- reconstruction loss: K",
                   L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
 
-        final_loss, i = 0., 0
-        for losses in LOSS:
-            final_loss += loss_weights[i] * torch.mean(losses)
-            i += 1
         return final_loss
 
     @staticmethod
