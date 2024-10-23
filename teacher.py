@@ -1348,53 +1348,50 @@ class teacher(nn.Module):
         bins = 256  # Note: 256 values
         r_out = torch.flatten(r_out, start_dim=1)
         pred_r = torch.flatten(pred_r, start_dim=1)
-        r_true_hist,_ = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth)
-        r_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth)
-        # r_true_hist_max = r_true_hist.max()
-        # r_true_hist = r_true_hist / (r_true_hist_max + 1e-9)
-        # r_pred_hist_max = r_pred_hist.max()
-        # r_pred_hist = r_pred_hist / (r_pred_hist_max + 1e-9)
-        r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
+        r_true_hist,r_true_hist_pdf = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        r_pred_hist,r_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        r_hist_loss = criterion(t * r_pred_hist_pdf + t_1 * r_true_hist_pdf, r_true_hist_pdf)
 
         g_out = torch.flatten(g_out, start_dim=1)
         pred_g = torch.flatten(pred_g, start_dim=1)
-        g_true_hist,_ = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth)
-        g_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth)
+        g_true_hist,g_true_hist_pdf = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        g_pred_hist,g_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
         # g_true_hist_max = g_true_hist.max()
         # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
         # g_pred_hist_max = g_pred_hist.max()
         # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
-        g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
+        g_hist_loss = criterion(t * g_pred_hist_pdf + t_1 * g_true_hist_pdf, g_true_hist_pdf)
 
         b_out = torch.flatten(b_out, start_dim=1)
         pred_b = torch.flatten(pred_b, start_dim=1)
-        b_true_hist,_ = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth)
-        b_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth)
+        b_true_hist,b_true_hist_pdf = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        b_pred_hist,b_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
         # b_true_hist_max = b_true_hist.max()
         # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
         # b_pred_hist_max = b_pred_hist.max()
         # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
-        b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
+        b_hist_loss = criterion(t * b_pred_hist_pdf + t_1 * b_true_hist_pdf, b_true_hist_pdf)
 
         a_out = torch.flatten(a_out, start_dim=1)
         pred_a = torch.flatten(pred_a, start_dim=1)
-        a_true_hist,_ = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth)
-        a_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth)
+        a_true_hist,a_true_hist_pdf = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        a_pred_hist,a_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
         # a_true_hist_max = a_true_hist.max()
         # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
         # a_pred_hist_max = a_pred_hist.max()
         # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
-        a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
+        a_hist_loss = criterion(t * a_pred_hist_pdf + t_1 * a_true_hist_pdf, a_true_hist_pdf)
 
         s_out = torch.flatten(s_out, start_dim=1)
         pred_s = torch.flatten(pred_s, start_dim=1)
-        s_true_hist,_ = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth)
-        s_pred_hist,_ = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth)
+        s_true_hist,s_true_hist_pdf = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        s_pred_hist,s_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
         # s_true_hist_max = s_true_hist.max()
         # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
         # s_pred_hist_max = s_pred_hist.max()
         # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
-        s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
+        s_hist_loss = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
+
         hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss, dim=1)
 
         # Note: SSIM Loss
@@ -1426,8 +1423,7 @@ class teacher(nn.Module):
         reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
         rec_loss = reconstruction_loss.mean()
 
-
-        A, B, C, D, E, F, G, H, I, J, K, L = loss_weights
+        A, B, C, D, E, F, G, H, I, J, K, L = torch.sigmoid(loss_weights)
 
         criterion.batch_size = value_loss.shape[0]
         gradient_penalty_loss = criterion.gradient_penalty(model)
@@ -1438,19 +1434,21 @@ class teacher(nn.Module):
         dispersion_loss = variance_loss / (mean_loss+1e-6)
         # print(gradient_penalty_loss[0])
         # Note: Normalisation of weights between each other
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, deepSLoss,
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
                 ssim_val, critical_loss, rec_loss)
         loss_weights = (A, B, C, D, E, F, G, H, J, K )
         total_weight = sum(loss_weights)+ 1e-4 * len(loss_weights)
         dynamic_weights = [w / total_weight for w in loss_weights]
         losses = (dynamic_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
-        (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, deepSLoss,
+        (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
          ssim_val, critical_loss, rec_loss) = losses
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,
+        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss,deepSLoss,
                 ssim_val, gradient_penalty_loss, critical_loss, rec_loss, dispersion_loss)
 
-        aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1e3, 1e3, 1e4, 1e5,1e5, 1e-3, 1e3, 1e3, 1, 1e2, 1e4, 1.
-        loss_weights = (aa, bb, cc, dd, ee, hh, ii, jj, kk, ll)
+        #aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1e3, 1e3, 1e4, 1e5,1e2, 1e5, 1e-1, 1e3, 1, 1e2, 1e4, 1.
+        aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1, 1, 1, 1,1, 1, 1, 1, 1, 1, 1, 1.
+
+        loss_weights = (aa, bb, cc, dd, ee,ff,gg, hh, ii, jj, kk, ll)
         final_loss = sum(loss_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
 
         if self.epoch % 50 == 0:
