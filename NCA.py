@@ -17,6 +17,7 @@ class NCA(nn.Module):
         self.boson_number =  self.particle_number
         self.patch_size_x = 15
         self.patch_size_y = 15
+        self.clamp_low,self.clamp_high = -2.,2.
         self.channels = channels
         self.nca_layer_1 = nn.Conv2d(in_channels=self.channels, out_channels=self.channels, kernel_size=1, stride=1)
         self.nca_layer_3 = nn.Conv2d(in_channels=self.channels, out_channels=self.channels, kernel_size=3, stride=1, padding=1)
@@ -45,7 +46,7 @@ class NCA(nn.Module):
             share_kv = False,
             reversible = True,
             dropout = 0.05,
-            k=256
+            k=64
         )
         self.boson_features = Linformer(
             dim=self.boson_number,
@@ -57,7 +58,7 @@ class NCA(nn.Module):
             share_kv=False,
             reversible=True,
             dropout=0.05,
-            k=256
+            k=64
         )
 
         self.project_fermions = nn.Linear(in_features=self.channels * self.patch_size_x * self.patch_size_y, out_features=self.fermion_number * self.fermion_number * self.kernel_size ** 2)
@@ -120,10 +121,10 @@ class NCA(nn.Module):
                                                      bosonic_energy_states * self.residual_weights[
                                                          i])  # Note: Progressing NCA dynamics by dx
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3],unbiased=False)
+                energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
                 with torch.no_grad():
                     self.learned_fermion_kernels[i].copy_(fermion_kernels)
                     self.learned_boson_kernels[i].copy_(boson_kernels)
-                return energy_spectrum, nca_var, ortho_mean, ortho_max
             else:
                 fermion_kernels = self.learned_fermion_kernels[i]
                 boson_kernels = self.learned_boson_kernels[i]
@@ -134,9 +135,10 @@ class NCA(nn.Module):
                 energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i]*self.spike_scale[i] +
                      bosonic_energy_states*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
+                energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
                 nca_var, ortho_mean, ortho_max = None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
-                return energy_spectrum,nca_var,ortho_mean,ortho_max
+        return energy_spectrum,nca_var,ortho_mean,ortho_max
 
     def forward(self, x,meta_embeddings,spiking_probabilities,batch_size):
         x,nca_var,ortho_mean,ortho_max = self.nca_update(x,meta_embeddings,spiking_probabilities,batch_size)
