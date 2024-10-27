@@ -3,7 +3,6 @@ import time
 
 import torch
 import torch.nn as nn
-
 from NCA import NCA
 
 
@@ -31,7 +30,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
-        self.NCA = NCA(self.hdc_dim,self.nca_steps,self.device)
+        self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.compress_NCA_out = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -89,7 +88,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_in(x))
         x = x.squeeze(1)
-        x,nca_var = self.NCA(x,meta_embeddings,spiking_probabilities)
+        x,nca_var,ortho_mean,ortho_max = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_out(x))
         x = x.squeeze(1)
@@ -106,7 +105,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         self.batch_size = old_batch_size
-        return r, g, b, a, s, deepS,nca_var,self.loss_weights
+        return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,self.loss_weights
 
     @staticmethod
     def binary(x, bits):

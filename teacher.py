@@ -734,7 +734,7 @@ class teacher(nn.Module):
 
             with torch.no_grad():
                 t_start = time.perf_counter()
-                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _ = self.model(dataset, spiking_probabilities)
+                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -1036,7 +1036,7 @@ class teacher(nn.Module):
         dataset = (data_input, structure_input, meta_input_h1, meta_input_h2,
                    meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                    meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
-        pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _ = self.model(dataset, spiking_probabilities)
+        pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
         prediction = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s], dim=1)
         ground_truth = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out, structure_output],
                                  dim=1)
@@ -1202,7 +1202,7 @@ class teacher(nn.Module):
 
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
                          criterion,norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var, loss_weights = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max, loss_weights = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1236,26 +1236,26 @@ class teacher(nn.Module):
             t_1 = t_1.unsqueeze(0).expand(n, -1, -1, -1).reshape(-1, t_1.shape[1], t_1.shape[1]).detach()
         # Solution for learning of the dynamics in loss calculation
 
-        # # NOTE: Firs order difference
-        # diff_r_true = r_out - r_in
-        # diff_r_pred = pred_r - r_in
-        # loss_diff_r = criterion(t * diff_r_pred + t_1 * diff_r_true, diff_r_true)
-        #
-        # diff_g_true = g_out - g_in
-        # diff_g_pred = pred_g - g_in
-        # loss_diff_g = criterion(t * diff_g_pred + t_1 * diff_g_true, diff_g_true)
-        # diff_b_true = b_out - b_in
-        # diff_b_pred = pred_b - b_in
-        # loss_diff_b = criterion(t * diff_b_pred + t_1 * diff_b_true, diff_b_true)
-        # diff_a_true = a_out - a_in
-        # diff_a_pred = pred_a - a_in
-        # loss_diff_a = criterion(t * diff_a_pred + t_1 * diff_a_true, diff_a_true)
-        # diff_s_true = s_out - s_in
-        # diff_s_pred = pred_s - s_in
-        # loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
-        # diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s, dim=[1, 2])
-        # # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
-        #
+        # NOTE: Firs order difference
+        diff_r_true = r_out - r_in
+        diff_r_pred = pred_r - r_in
+        loss_diff_r = criterion(t * diff_r_pred + t_1 * diff_r_true, diff_r_true)
+
+        diff_g_true = g_out - g_in
+        diff_g_pred = pred_g - g_in
+        loss_diff_g = criterion(t * diff_g_pred + t_1 * diff_g_true, diff_g_true)
+        diff_b_true = b_out - b_in
+        diff_b_pred = pred_b - b_in
+        loss_diff_b = criterion(t * diff_b_pred + t_1 * diff_b_true, diff_b_true)
+        diff_a_true = a_out - a_in
+        diff_a_pred = pred_a - a_in
+        loss_diff_a = criterion(t * diff_a_pred + t_1 * diff_a_true, diff_a_true)
+        diff_s_true = s_out - s_in
+        diff_s_pred = pred_s - s_in
+        loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
+        diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s, dim=[1, 2])
+        # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
+
         # # Note: Gradient loss
         # grad_r_true = torch.gradient(r_out)[0]
         # grad_r_pred = torch.gradient(pred_r)[0]
@@ -1476,7 +1476,7 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
 
-        return torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
+        return ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
 
     @staticmethod
     def seed_setter(seed):
