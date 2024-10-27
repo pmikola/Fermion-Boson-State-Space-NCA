@@ -611,7 +611,7 @@ class teacher(nn.Module):
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 1000, 4700
+        x, y = 1500, 4700
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
@@ -793,8 +793,9 @@ class teacher(nn.Module):
 
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
-
-            w_static = ax4.imshow(w_stat, cmap='RdBu')
+            #log_w_stat = np.log10(w_stat + 1e-10) # Note : for positive val only
+            log_w_stat = np.sign(w_stat) * np.log10(np.abs(w_stat) + 1e-10)
+            w_static = ax4.imshow(log_w_stat, cmap='seismic')
             ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, w_static, title_pred, title_true, title_rms])
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
@@ -1131,12 +1132,12 @@ class teacher(nn.Module):
                     val_loss_recent_history = np.array(self.val_loss)[-10:-1]
                     mean_hist_losses = np.mean(loss_recent_history)
                     if loss_recent_history[-1] > loss_recent_history[-2] or loss_recent_history[-1] < \
-                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-6:
+                            loss_recent_history[-2] * 0.9 or loss_recent_history[-1] > 1e-3:
                         reiterate_data = 1
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 50:
+                    if reiterate_counter > 100:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -1329,8 +1330,8 @@ class teacher(nn.Module):
         loss_alpha = criterion(t * pred_a + t_1 * a_out, a_out)
         loss_s = criterion(t * pred_s + t_1 * s_out, s_out)
         value_loss = torch.mean(loss_r + loss_g + loss_b + loss_alpha + loss_s, dim=[1, 2])
-        value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
-        #
+        #value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
+
         # # Note: Deep Supervision Loss cosine sim
         # rres, gres, bres, ares, sres = deepS
         # dpSWeight = 1.0
@@ -1341,8 +1342,8 @@ class teacher(nn.Module):
         # cosine_loss_sres = 1 - torch.nn.functional.cosine_similarity(sres.flatten(1), s_out.flatten(1), dim=1).mean()
         # deepSLoss = dpSWeight * (cosine_loss_rres + cosine_loss_gres + cosine_loss_bres + cosine_loss_ares + cosine_loss_sres) / 5
         #
-        t = t.squeeze(1)
-        t_1 = t_1.squeeze(1)
+        t = t.squeeze()
+        t_1 = t_1.squeeze()
         # Solution for learning and maintaining of the proper color and other element space
         bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
         bins = 256  # Note: 256 values
@@ -1400,9 +1401,8 @@ class teacher(nn.Module):
         s_hist_loss_pdf = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
         s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
 
-
-        hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss, dim=1)
-        hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf, dim=1)
+        hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss)
+        hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf)
 
         #
         # # Note: SSIM Loss
@@ -1426,7 +1426,7 @@ class teacher(nn.Module):
         # ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
         #
         # NCA Criticality loss
-        target_variance = 0.49
+        target_variance = torch.full_like(nca_var,0.49,requires_grad=True)
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
         #
         # # Reconstruction loss
@@ -1474,6 +1474,7 @@ class teacher(nn.Module):
         #           J*jj*critical_loss.mean().item(), "<- critical loss: J",
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
+        # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
 
         return critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
 
