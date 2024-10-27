@@ -40,14 +40,24 @@ class NCA(nn.Module):
             seq_len=self.patch_size_x * self.patch_size_y,
             depth=3,
             heads=self.fermion_number,
-            k=128
+            dim_head =self.fermion_number//2,
+            one_kv_head = False,
+            share_kv = False,
+            reversible = True,
+            dropout = 0.05,
+            k=256
         )
         self.boson_features = Linformer(
             dim=self.boson_number,
             seq_len=self.patch_size_x * self.patch_size_y,
             depth=3,
             heads=self.boson_number,
-            k=128
+            dim_head=self.boson_number // 2,
+            one_kv_head=False,
+            share_kv=False,
+            reversible=True,
+            dropout=0.05,
+            k=256
         )
 
         self.project_fermions = nn.Linear(in_features=self.channels * self.patch_size_x * self.patch_size_y, out_features=self.fermion_number * self.fermion_number * self.kernel_size ** 2)
@@ -85,11 +95,11 @@ class NCA(nn.Module):
         for i in range(self.num_steps):
             if self.training:
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], -1, energy_spectrum.shape[1])
-                fermion_kernels = self.fermion_features(reshaped_energy_spectrum)
+                fermion_kernels = self.act(self.fermion_features(reshaped_energy_spectrum))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 fermion_kernels = fermion_kernels.flatten(start_dim=1)
 
-                boson_kernels = self.fermion_features(reshaped_energy_spectrum)
+                boson_kernels = self.act(self.boson_features(reshaped_energy_spectrum))
                 boson_kernels = boson_kernels.flatten(start_dim=1)
 
                 fermion_kernels = self.act(self.project_fermions(fermion_kernels))

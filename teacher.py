@@ -794,13 +794,13 @@ class teacher(nn.Module):
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
             #log_w_stat = np.log10(w_stat + 1e-10) # Note : for positive val only
-            log_w_stat = np.sign(w_stat) * np.log10(np.abs(w_stat) + 1e-10)
+            log_w_stat = np.log10(np.abs(w_stat) + 1e-10)*np.sign(w_stat)
             w_static = ax4.imshow(log_w_stat, cmap='seismic')
             ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, w_static, title_pred, title_true, title_rms])
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif")
+        ani.save("flame_animation.gif", writer='imagemagick', fps=30,dpi=200)
 
         plt.show()
 
