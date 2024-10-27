@@ -1425,10 +1425,9 @@ class teacher(nn.Module):
         # rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
         # ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
         #
-        # # NCA Criticality loss
-        # target_variance = 0.49
-        # normalized_nca_var = nca_var / torch.sum(nca_var, dim=1, keepdim=True) + 1e-6
-        # critical_loss = torch.mean(torch.abs(target_variance - normalized_nca_var))
+        # NCA Criticality loss
+        target_variance = 0.49
+        critical_loss = torch.mean(torch.abs(target_variance - nca_var))
         #
         # # Reconstruction loss
         # reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
@@ -1476,7 +1475,7 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
 
-        return ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
+        return critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
 
     @staticmethod
     def seed_setter(seed):

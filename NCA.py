@@ -12,7 +12,7 @@ class NCA(nn.Module):
         self.batch_size = batch_size
         self.device = device
         self.num_steps =num_steps
-        self.particle_number = 10
+        self.particle_number = channels
         self.fermion_number =  self.particle_number
         self.boson_number =  self.particle_number
         self.patch_size_x = 15
@@ -30,8 +30,8 @@ class NCA(nn.Module):
 
         self.nca_fusion = nn.Conv2d(in_channels=self.channels, out_channels=self.channels, kernel_size=1, stride=1, padding=0)
         self.kernel_size = 3
-        self.fermionic_NCA = FermionConvLayer(in_channels=self.channels, out_channels=self.channels, kernel_size=self.kernel_size)
-        self.bosonic_NCA = BosonConvLayer(in_channels=self.channels, out_channels=self.channels, kernel_size=self.kernel_size)
+        self.fermionic_NCA = FermionConvLayer(channels=self.channels, kernel_size=self.kernel_size)
+        self.bosonic_NCA = BosonConvLayer(channels=self.channels, kernel_size=self.kernel_size)
 
         # self.particle_features = Performer(dim=self.particle_number, dim_head=self.particle_number, depth=1, heads=self.particle_number)
 
@@ -88,28 +88,31 @@ class NCA(nn.Module):
                 fermion_kernels = self.fermion_features(reshaped_energy_spectrum)
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 fermion_kernels = fermion_kernels.flatten(start_dim=1)
+
                 boson_kernels = self.fermion_features(reshaped_energy_spectrum)
                 boson_kernels = boson_kernels.flatten(start_dim=1)
+
                 fermion_kernels = self.act(self.project_fermions(fermion_kernels))
                 boson_kernels = self.act(self.project_bosons(boson_kernels))
 
-                #fermion_kernels, _ = torch.qr(fermion_kernels) # Note: check Orthogonality and if this is wanted behavior
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
                 boson_kernels = boson_kernels.mean(dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
+
                 fermionic_response = self.fermionic_NCA(energy_spectrum, weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
+
                 bosonic_response = self.bosonic_NCA(fermion_energy_states, weights=boson_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
+
                 energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
                                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
                                                      self.spike_scale[i] +
                                                      bosonic_energy_states * self.residual_weights[
                                                          i])  # Note: Progressing NCA dynamics by dx
-                nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3])
+                nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3],unbiased=False)
                 with torch.no_grad():
                     self.learned_fermion_kernels[i].copy_(fermion_kernels)
                     self.learned_boson_kernels[i].copy_(boson_kernels)
-
                 return energy_spectrum, nca_var, ortho_mean, ortho_max
             else:
                 fermion_kernels = self.learned_fermion_kernels[i]
@@ -122,55 +125,52 @@ class NCA(nn.Module):
                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i]*self.spike_scale[i] +
                      bosonic_energy_states*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
                 nca_var, ortho_mean, ortho_max = None,None,None
-            #energy_spectrum = dct.idct_3d(energy_spectrum)
-            return energy_spectrum,nca_var,ortho_mean,ortho_max
+                #energy_spectrum = dct.idct_3d(energy_spectrum)
+                return energy_spectrum,nca_var,ortho_mean,ortho_max
 
     def forward(self, x,meta_embeddings,spiking_probabilities,batch_size):
         x,nca_var,ortho_mean,ortho_max = self.nca_update(x,meta_embeddings,spiking_probabilities,batch_size)
         return x,nca_var,ortho_mean,ortho_max
 
     def validate_channel_orthogonality(self,particles):
-        particles = particles.view(self.batch_size,self.channels,self.patch_size_x,self.patch_size_y)
-        batch_size, channels, k, k = particles.shape
-        tensor_flattened = particles.view(batch_size, channels, -1)
-        orthogonality_results_list = []
-        for b in range(batch_size):
-            channel_vectors = tensor_flattened[b]
-            dot_products = torch.mm(channel_vectors, channel_vectors.T)
-            identity_mask = torch.eye(channels, device=self.device)
-            off_diagonal_elements = dot_products * (1 - identity_mask)
-            mean_off_diagonal = torch.mean(torch.abs(off_diagonal_elements))
-            max_off_diagonal = torch.max(torch.abs(off_diagonal_elements))
-            orthogonality_results_list.append(torch.stack([mean_off_diagonal, max_off_diagonal]))
+        particles = particles.view(self.batch_size, self.channels, -1)
+        dot_products = torch.bmm(particles, particles.transpose(1, 2))
+        identity_mask = torch.eye(self.channels, device=particles.device).unsqueeze(0)
+        identity_mask = identity_mask.expand(self.batch_size, -1, -1)
+        off_diagonal_elements = dot_products * (1 - identity_mask)
+        mean_off_diagonal = torch.mean(torch.abs(off_diagonal_elements), dim=(1, 2))
+        max_off_diagonal = torch.amax(torch.abs(off_diagonal_elements), dim=(1, 2))
+        ortho_mean = torch.mean(mean_off_diagonal)
+        ortho_max = torch.mean(max_off_diagonal)
 
-        orthogonality_results = torch.stack(orthogonality_results_list)
-        ortho_mean = torch.mean(orthogonality_results[:,0])
-        ortho_max = torch.mean(orthogonality_results[:,1])
-        return ortho_mean,ortho_max
+        return ortho_mean, ortho_max
 
 
 class FermionConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3):
+    def __init__(self, channels, kernel_size=3):
         super(FermionConvLayer, self).__init__()
-        #self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=kernel_size//2)
+        self.fermion_gate = nn.Linear(channels, channels, bias=True)
         self.act = nn.ELU(alpha=2.)
         self.kernel_size= kernel_size
 
     def forward(self, x, weights):
-        # if weights is not None:
-        return  self.act(torch.nn.functional.conv2d(x, weights, padding=self.kernel_size//2))
-        # else:
-        #     return  self.act(self.conv(x))
+        f_o = self.act(torch.nn.functional.conv2d(x, weights, padding=self.kernel_size // 2))
+        gating_input = f_o.mean(dim=[2, 3])
+        gate = torch.sigmoid(self.fermion_gate(gating_input))
+        gated_output = f_o * gate.unsqueeze(-1).unsqueeze(-1)
+        return gated_output
+
 
 class BosonConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3):
+    def __init__(self, channels, kernel_size=3):
         super(BosonConvLayer, self).__init__()
-        #self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=kernel_size//2)
+        self.boson_gate = nn.Linear(channels, channels, bias=True)
         self.act = nn.ELU(alpha=2.)
         self.kernel_size = kernel_size
 
     def forward(self, x, weights):
-        # if weights is not None:
-        return  self.act(torch.nn.functional.conv2d(x, weights, padding=self.kernel_size//2))
-        # else:
-        #     return  self.act(self.conv(x))
+        b_o = self.act(torch.nn.functional.conv2d(x, weights, padding=self.kernel_size // 2))
+        gating_input = b_o.mean(dim=[2, 3])
+        gate = torch.sigmoid(self.boson_gate(gating_input))
+        gated_output = b_o * gate.unsqueeze(-1).unsqueeze(-1)
+        return gated_output
