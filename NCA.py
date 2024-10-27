@@ -46,7 +46,7 @@ class NCA(nn.Module):
             share_kv = False,
             reversible = True,
             dropout = 0.05,
-            k=64
+            k=self.patch_size_x * self.patch_size_y
         )
         self.boson_features = Linformer(
             dim=self.boson_number,
@@ -58,7 +58,7 @@ class NCA(nn.Module):
             share_kv=False,
             reversible=True,
             dropout=0.05,
-            k=64
+            k=self.patch_size_x * self.patch_size_y
         )
 
         self.project_fermions = nn.Linear(in_features=self.channels * self.patch_size_x * self.patch_size_y, out_features=self.fermion_number * self.fermion_number * self.kernel_size ** 2)
@@ -121,7 +121,7 @@ class NCA(nn.Module):
                                                      bosonic_energy_states * self.residual_weights[
                                                          i])  # Note: Progressing NCA dynamics by dx
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3],unbiased=False)
-                energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
+                #energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
                 with torch.no_grad():
                     self.learned_fermion_kernels[i].copy_(fermion_kernels)
                     self.learned_boson_kernels[i].copy_(boson_kernels)
@@ -135,7 +135,7 @@ class NCA(nn.Module):
                 energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i]*self.spike_scale[i] +
                      bosonic_energy_states*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
-                energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
+                #energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
                 nca_var, ortho_mean, ortho_max = None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
         return energy_spectrum,nca_var,ortho_mean,ortho_max

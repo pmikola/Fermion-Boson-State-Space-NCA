@@ -31,7 +31,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
+        self.downlif_data = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
         self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
         self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
@@ -92,7 +92,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_out(x))
         x = x.squeeze(1)
-        x = self.act(self.compress_NCA_out(x))
+        x = self.act(self.downlif_data(x))
 
         r = torch.sigmoid(self.r(x).squeeze())
         g = torch.sigmoid(self.g(x).squeeze())

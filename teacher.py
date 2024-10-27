@@ -1430,8 +1430,8 @@ class teacher(nn.Module):
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
         #
         # # Reconstruction loss
-        # reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
-        # rec_loss = reconstruction_loss.mean()
+        reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
+        rec_loss = reconstruction_loss.mean()
         #
         # A, B, C, D, E, F, G, H, I, J, K, L = torch.sigmoid(loss_weights)
         #
@@ -1475,8 +1475,8 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-
-        return critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#final_loss
+        final_loss =  rec_loss*1e1+critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5
+        return final_loss
 
     @staticmethod
     def seed_setter(seed):
