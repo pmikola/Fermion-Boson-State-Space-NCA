@@ -6,7 +6,8 @@ from geomloss import SamplesLoss
 class CustomLoss(nn.Module):
     def __init__(self,device):
         super().__init__()
-        self.loss_alpha = nn.MSELoss(reduction='none')
+        #self.loss_alpha = nn.MSELoss(reduction='none')
+        self.loss_alpha = nn.HuberLoss(reduction='none',delta=0.5)
         # SamplesLoss(loss="sinkhorn", p=2, blur=.05)
         self.device = device
         self.batch_size = torch.tensor(256).to(self.device)

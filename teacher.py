@@ -801,7 +801,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=30,dpi=200)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=20,dpi=250)
 
         plt.show()
 
@@ -1165,7 +1165,7 @@ class teacher(nn.Module):
 
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
-                if self.cpu_tem[-1] > 95 or self.gpu_temp[-1] > 75:
+                if self.cpu_temp[-1] > 90 or self.gpu_temp[-1] > 75:
                     torch.cuda.synchronize()
                     time.sleep(2)
 
@@ -1176,7 +1176,7 @@ class teacher(nn.Module):
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
                         f'vL: {val_loss.item():.6f}, '
                         f'mL: {loss.item():.6f}, '
-                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms],'
+                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
                         f'CPU TEMP: {WinTmp.CPU_Temp()}, '
                         f'GPU TEMP: {WinTmp.GPU_Temp()} '
                     )
@@ -1444,8 +1444,8 @@ class teacher(nn.Module):
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
         #
         # # Reconstruction loss
-        reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
-        rec_loss = reconstruction_loss.mean()
+        # reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
+        # rec_loss = reconstruction_loss.mean()
         #
         # A, B, C, D, E, F, G, H, I, J, K, L = torch.sigmoid(loss_weights)
         #
@@ -1489,7 +1489,7 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-        final_loss =  rec_loss*1e1+critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5
+        final_loss =  critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#rec_loss*1e1
         return final_loss
 
     @staticmethod

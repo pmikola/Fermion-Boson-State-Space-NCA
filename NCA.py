@@ -39,7 +39,7 @@ class NCA(nn.Module):
         self.fermion_features = Linformer(
             dim=self.fermion_number,
             seq_len=self.patch_size_x * self.patch_size_y,
-            depth=3,
+            depth=1,
             heads=self.fermion_number,
             dim_head =self.fermion_number//2,
             one_kv_head = False,
@@ -48,10 +48,11 @@ class NCA(nn.Module):
             dropout = 0.05,
             k=self.patch_size_x * self.patch_size_y
         )
+
         self.boson_features = Linformer(
             dim=self.boson_number,
             seq_len=self.patch_size_x * self.patch_size_y,
-            depth=3,
+            depth=1,
             heads=self.boson_number,
             dim_head=self.boson_number // 2,
             one_kv_head=False,
@@ -108,7 +109,7 @@ class NCA(nn.Module):
 
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
                 boson_kernels = boson_kernels.mean(dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
-
+                
                 fermionic_response = self.fermionic_NCA(energy_spectrum,meta_embeddings, weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
 

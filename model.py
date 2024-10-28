@@ -19,9 +19,9 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.in_scale = (1 + self.input_window_size * 2)
         self.loss_weights = nn.Parameter(torch.ones(12))
         self.modes = 32
-        self.uplift_meta_0 = nn.Linear(5*self.modes,10*self.modes)
-        self.uplift_meta_1 = nn.Linear(10*self.modes, 5 * self.in_scale ** 2)
-        self.compress_time = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
+        self.uplift_meta_0 = nn.Linear(200,15*self.modes)
+        self.uplift_meta_1 = nn.Linear(15*self.modes, 5 * self.in_scale ** 2)
+        self.uplift_meta = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=3,stride=1,padding=1)
 
         self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
@@ -77,12 +77,14 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         s = structure_input.unsqueeze(1)
         data = torch.cat([r,g,b,a,s],dim=1)
         time_in,time_out = meta_input_h2,meta_output_h2
+        pos_in,pos_out = meta_input_h3,meta_output_h3
 
-        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out],dim=-1)
+        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out,pos_in,pos_out],dim=-1)
+        #print(meta_to_uplift.shape)
         meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
         meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
         meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)
-        meta_embeddings =  self.act(self.compress_time(meta_uplifted))
+        meta_embeddings =  self.act(self.uplift_meta(meta_uplifted))
 
         x = self.act(self.uplift_data(data))
         x = x.unsqueeze(1)
@@ -94,11 +96,11 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = x.squeeze(1)
         x = self.act(self.downlif_data(x))
 
-        r = torch.sigmoid(self.r(x).squeeze())
-        g = torch.sigmoid(self.g(x).squeeze())
-        b = torch.sigmoid(self.b(x).squeeze())
-        a = torch.sigmoid(self.a(x).squeeze())
-        s = torch.sigmoid(self.s(x).squeeze())
+        r = self.r(x).squeeze()
+        g = self.g(x).squeeze()
+        b = self.b(x).squeeze()
+        a = self.a(x).squeeze()
+        s = self.s(x).squeeze()
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()
