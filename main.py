@@ -58,5 +58,5 @@ for period in range(1, no_periods + 1):
                      num_epochs=8000)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
-t.visualize_lerning()
+# t.visualize_lerning()
 t.examine(criterion, device, plot=1)

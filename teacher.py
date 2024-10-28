@@ -5,12 +5,10 @@ import random
 import struct
 import time
 from statistics import mean
-
 from torch import nn
-
 # import ssim
 from pytorch_msssim import SSIM, MS_SSIM
-
+import WinTmp
 import kornia
 import numpy as np
 import torch
@@ -82,6 +80,8 @@ class teacher(nn.Module):
         self.num_of_epochs = 0
         self.train_loss = []
         self.val_loss = []
+        self.cpu_temp = []
+        self.gpu_temp = []
         self.h = None
         self.w = None
         self.n_frames = None
@@ -91,6 +91,7 @@ class teacher(nn.Module):
         self.b_slices = None
         self.alpha_slices = None
         self.meta_binary_slices = None
+
 
     def generate_structure(self):
         no_structure = random.randint(0, self.fsim.grid_size_y - self.fsim.N_boundary)
@@ -1100,6 +1101,7 @@ class teacher(nn.Module):
                 t_start = time.perf_counter()
                 model_output = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
+
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
@@ -1119,6 +1121,8 @@ class teacher(nn.Module):
 
                 self.train_loss.append(loss.item())
                 self.val_loss.append(val_loss.item())
+                self.cpu_temp.append(WinTmp.CPU_Temp())
+                self.gpu_temp.append(WinTmp.GPU_Temp())
 
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
@@ -1161,6 +1165,10 @@ class teacher(nn.Module):
 
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
+                if self.cpu_tem[-1] > 95 or self.gpu_temp[-1] > 75:
+                    torch.cuda.synchronize()
+                    time.sleep(2)
+
                 if (epoch + 1) % print_every_nth_frame == 0:
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
@@ -1168,7 +1176,11 @@ class teacher(nn.Module):
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
                         f'vL: {val_loss.item():.6f}, '
                         f'mL: {loss.item():.6f}, '
-                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms]')
+                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms],'
+                        f'CPU TEMP: {WinTmp.CPU_Temp()}, '
+                        f'GPU TEMP: {WinTmp.GPU_Temp()} '
+                    )
+
                     t = 0.
                     t_epoch = 0.
         else:
@@ -1185,6 +1197,8 @@ class teacher(nn.Module):
     def visualize_lerning(self, poly_degree=3):
         plt.plot(self.train_loss)
         plt.plot(self.val_loss)
+        plt.plot(self.cpu_temp,label='cpu_temp')
+        plt.plot(self.gpu_temp,label='gpu_temp')
         avg_train_loss = sum(self.train_loss) / len(self.train_loss)
         avg_val_loss = sum(self.val_loss) / len(self.val_loss)
         epochs = np.arange(len(self.train_loss))
