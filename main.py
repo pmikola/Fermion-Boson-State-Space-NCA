@@ -20,20 +20,20 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 # torch.autograd.set_detect_anomaly(True) # Note : Tremendously slowing down program - Attention: Be careful!
 
 no_frame_samples = 50
-batch_size = 256
+batch_size = 32
 input_window_size = 7
 
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
 hdc_dim = 10
 rbf_probes_number = 5
-nca_steps = 5
+nca_steps = 10
 
 model = Fermionic_Bosonic_Space_State_NCA(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
 no_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Number of parameters in trained architecture :", round(no_params*1e-6,2),' [M]')
 
-torch.save(model.state_dict(), 'model.pt')
+# torch.save(model.state_dict(), 'model.pt')
 t = teacher(model, device)
 t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
@@ -55,8 +55,8 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip * 2, criterion, optimizer ,device, learning=1,
-                     num_epochs=1000)
+                     num_epochs=40000)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
-t.visualize_lerning(1)
+t.visualize_lerning(5)
 t.examine(criterion, device, plot=1)

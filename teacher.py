@@ -6,6 +6,8 @@ import struct
 import time
 from statistics import mean
 from torch import nn
+import gpustat
+from geomloss import SamplesLoss
 # import ssim
 from pytorch_msssim import SSIM, MS_SSIM
 import WinTmp
@@ -36,7 +38,7 @@ class teacher(nn.Module):
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
         self.ssim_loss = SSIM(data_range=1., channel=5,nonnegative_ssim=True,K=(0.01, 0.1),win_size=7).to(self.device)
-
+        self.sinkhorn_loss = SamplesLoss("sinkhorn", p=2, blur=0.05)
 
         self.data_input = None
         self.structure_input = None  #torch.zeros((self.model.batch_size,self.model.in_scale,self.model.in_scale),requires_grad=True)
@@ -270,8 +272,8 @@ class teacher(nn.Module):
             idx_output = random.choice(range(0, self.n_frames))
             offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
             offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in  #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
-            central_point_y_out = central_point_y_in  #+ offset_y
+            central_point_x_out = central_point_x_in  + offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
+            central_point_y_out = central_point_y_in  + offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -707,7 +709,7 @@ class teacher(nn.Module):
             meta_output_h5 = meta_step_out_numeric.repeat(data_input.shape[0], 1).squeeze(1)
             noise_var_out = torch.zeros((data_input.shape[0], 32))
 
-            self.model.eval()
+
 
             (data_input, structure_input, meta_input_h1, meta_input_h2,
              meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
@@ -732,10 +734,12 @@ class teacher(nn.Module):
             dataset = (data_input, structure_input, meta_input_h1, meta_input_h2,
                        meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
-
+            self.model.eval()
             with torch.no_grad():
                 t_start = time.perf_counter()
                 pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
+                # print(pred_r)
+                # time.sleep(1000)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
             print(f'Pred Time: {t * 1e3:.1f} [ms]')
@@ -801,7 +805,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=20,dpi=250)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=20,dpi=200)
 
         plt.show()
 
@@ -1166,10 +1170,13 @@ class teacher(nn.Module):
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
                 if self.cpu_temp[-1] > 90 or self.gpu_temp[-1] > 75:
+                    print('too hot! lets cool down a little bit')
                     torch.cuda.synchronize()
                     time.sleep(2)
 
                 if (epoch + 1) % print_every_nth_frame == 0:
+                    gpu_stats = gpustat.GPUStatCollection.new_query()
+                    mem_usage = [gpu.memory_used for gpu in gpu_stats]
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
                     print(
@@ -1177,10 +1184,10 @@ class teacher(nn.Module):
                         f'vL: {val_loss.item():.6f}, '
                         f'mL: {loss.item():.6f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
-                        f'CPU TEMP: {WinTmp.CPU_Temp()}, '
-                        f'GPU TEMP: {WinTmp.GPU_Temp()} '
+                        f'CPU TEMP: {WinTmp.CPU_Temp()} [°C], '
+                        f'GPU TEMP: {WinTmp.GPU_Temp()} [°C], '
+                        f'GPU MEM: {round(mem_usage[0]*1e-3,3)} [GB] '
                     )
-
                     t = 0.
                     t_epoch = 0.
         else:
@@ -1317,25 +1324,25 @@ class teacher(nn.Module):
         fft_loss = torch.mean(fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s, dim=[1, 2])
         # fft_loss = fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s
 
-        # # Note: Fourier Gradient Loss
-        # diff_fft_true_r = fft_out_true_r - fft_in_true_r
-        # diff_fft_pred_r = fft_out_pred_r - fft_in_true_r
-        # diff_fft_loss_r = criterion(t * diff_fft_pred_r + t_1 * diff_fft_true_r, diff_fft_true_r)
-        # diff_fft_true_g = fft_out_true_g - fft_in_true_g
-        # diff_fft_pred_g = fft_out_pred_g - fft_in_true_g
-        # diff_fft_loss_g = criterion(t * diff_fft_pred_g + t_1 * diff_fft_true_r, diff_fft_true_g)
-        # diff_fft_true_b = fft_out_true_b - fft_in_true_b
-        # diff_fft_pred_b = fft_out_pred_b - fft_in_true_b
-        # diff_fft_loss_b = criterion(t * diff_fft_pred_b + t_1 * diff_fft_true_r, diff_fft_true_b)
-        # diff_fft_true_a = fft_out_true_a - fft_in_true_a
-        # diff_fft_pred_a = fft_out_pred_a - fft_in_true_a
-        # diff_fft_loss_a = criterion(t * diff_fft_pred_a + t_1 * diff_fft_true_r, diff_fft_true_a)
-        # diff_fft_true_s = fft_out_true_s - fft_in_true_s
-        # diff_fft_pred_s = fft_out_pred_s - fft_in_true_s
-        # diff_fft_loss_s = criterion(t * diff_fft_pred_s + t_1 * diff_fft_true_r, diff_fft_true_s)
-        # diff_fft_loss = torch.mean(
-        #     diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s, dim=[1, 2])
-        # # diff_fft_loss = diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s
+        # Note: Fourier Gradient Loss
+        diff_fft_true_r = fft_out_true_r - fft_in_true_r
+        diff_fft_pred_r = fft_out_pred_r - fft_in_true_r
+        diff_fft_loss_r = criterion(t * diff_fft_pred_r + t_1 * diff_fft_true_r, diff_fft_true_r)
+        diff_fft_true_g = fft_out_true_g - fft_in_true_g
+        diff_fft_pred_g = fft_out_pred_g - fft_in_true_g
+        diff_fft_loss_g = criterion(t * diff_fft_pred_g + t_1 * diff_fft_true_r, diff_fft_true_g)
+        diff_fft_true_b = fft_out_true_b - fft_in_true_b
+        diff_fft_pred_b = fft_out_pred_b - fft_in_true_b
+        diff_fft_loss_b = criterion(t * diff_fft_pred_b + t_1 * diff_fft_true_r, diff_fft_true_b)
+        diff_fft_true_a = fft_out_true_a - fft_in_true_a
+        diff_fft_pred_a = fft_out_pred_a - fft_in_true_a
+        diff_fft_loss_a = criterion(t * diff_fft_pred_a + t_1 * diff_fft_true_r, diff_fft_true_a)
+        diff_fft_true_s = fft_out_true_s - fft_in_true_s
+        diff_fft_pred_s = fft_out_pred_s - fft_in_true_s
+        diff_fft_loss_s = criterion(t * diff_fft_pred_s + t_1 * diff_fft_true_r, diff_fft_true_s)
+        diff_fft_loss = torch.mean(
+            diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s, dim=[1, 2])
+        # diff_fft_loss = diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s
         #
         # Note : Exact value loss
         loss_r = criterion(t * pred_r + t_1 * r_out, r_out)
@@ -1359,64 +1366,64 @@ class teacher(nn.Module):
         t = t.squeeze()
         t_1 = t_1.squeeze()
         # Solution for learning and maintaining of the proper color and other element space
-        bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
-        bins = 256  # Note: 256 values
-        r_out = torch.flatten(r_out, start_dim=1)
-        pred_r = torch.flatten(pred_r, start_dim=1)
-        r_true_hist,r_true_hist_pdf = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
-        r_pred_hist,r_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
-        r_hist_loss_pdf = criterion(t * r_pred_hist_pdf + t_1 * r_true_hist_pdf, r_true_hist_pdf)
-        r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
-
-        g_out = torch.flatten(g_out, start_dim=1)
-        pred_g = torch.flatten(pred_g, start_dim=1)
-        g_true_hist,g_true_hist_pdf = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        g_pred_hist,g_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # g_true_hist_max = g_true_hist.max()
-        # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
-        # g_pred_hist_max = g_pred_hist.max()
-        # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
-        g_hist_loss_pdf = criterion(t * g_pred_hist_pdf + t_1 * g_true_hist_pdf, g_true_hist_pdf)
-        g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
-
-
-        b_out = torch.flatten(b_out, start_dim=1)
-        pred_b = torch.flatten(pred_b, start_dim=1)
-        b_true_hist,b_true_hist_pdf = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        b_pred_hist,b_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # b_true_hist_max = b_true_hist.max()
-        # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
-        # b_pred_hist_max = b_pred_hist.max()
-        # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
-        b_hist_loss_pdf = criterion(t * b_pred_hist_pdf + t_1 * b_true_hist_pdf, b_true_hist_pdf)
-        b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
-
-
-        a_out = torch.flatten(a_out, start_dim=1)
-        pred_a = torch.flatten(pred_a, start_dim=1)
-        a_true_hist,a_true_hist_pdf = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        a_pred_hist,a_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # a_true_hist_max = a_true_hist.max()
-        # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
-        # a_pred_hist_max = a_pred_hist.max()
-        # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
-        a_hist_loss_pdf = criterion(t * a_pred_hist_pdf + t_1 * a_true_hist_pdf, a_true_hist_pdf)
-        a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
-
-
-        s_out = torch.flatten(s_out, start_dim=1)
-        pred_s = torch.flatten(pred_s, start_dim=1)
-        s_true_hist,s_true_hist_pdf = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        s_pred_hist,s_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # s_true_hist_max = s_true_hist.max()
-        # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
-        # s_pred_hist_max = s_pred_hist.max()
-        # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
-        s_hist_loss_pdf = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
-        s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
-
-        hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss)
-        hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf)
+        # bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
+        # bins = 256  # Note: 256 values
+        # r_out = torch.flatten(r_out, start_dim=1)
+        # pred_r = torch.flatten(pred_r, start_dim=1)
+        # r_true_hist,r_true_hist_pdf = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        # r_pred_hist,r_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        # r_hist_loss_pdf = criterion(t * r_pred_hist_pdf + t_1 * r_true_hist_pdf, r_true_hist_pdf)
+        # r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
+        #
+        # g_out = torch.flatten(g_out, start_dim=1)
+        # pred_g = torch.flatten(pred_g, start_dim=1)
+        # g_true_hist,g_true_hist_pdf = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # g_pred_hist,g_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # g_true_hist_max = g_true_hist.max()
+        # # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
+        # # g_pred_hist_max = g_pred_hist.max()
+        # # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
+        # g_hist_loss_pdf = criterion(t * g_pred_hist_pdf + t_1 * g_true_hist_pdf, g_true_hist_pdf)
+        # g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
+        #
+        #
+        # b_out = torch.flatten(b_out, start_dim=1)
+        # pred_b = torch.flatten(pred_b, start_dim=1)
+        # b_true_hist,b_true_hist_pdf = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # b_pred_hist,b_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # b_true_hist_max = b_true_hist.max()
+        # # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
+        # # b_pred_hist_max = b_pred_hist.max()
+        # # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
+        # b_hist_loss_pdf = criterion(t * b_pred_hist_pdf + t_1 * b_true_hist_pdf, b_true_hist_pdf)
+        # b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
+        #
+        #
+        # a_out = torch.flatten(a_out, start_dim=1)
+        # pred_a = torch.flatten(pred_a, start_dim=1)
+        # a_true_hist,a_true_hist_pdf = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # a_pred_hist,a_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # a_true_hist_max = a_true_hist.max()
+        # # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
+        # # a_pred_hist_max = a_pred_hist.max()
+        # # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
+        # a_hist_loss_pdf = criterion(t * a_pred_hist_pdf + t_1 * a_true_hist_pdf, a_true_hist_pdf)
+        # a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
+        #
+        #
+        # s_out = torch.flatten(s_out, start_dim=1)
+        # pred_s = torch.flatten(pred_s, start_dim=1)
+        # s_true_hist,s_true_hist_pdf = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # s_pred_hist,s_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # s_true_hist_max = s_true_hist.max()
+        # # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
+        # # s_pred_hist_max = s_pred_hist.max()
+        # # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
+        # s_hist_loss_pdf = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
+        # s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
+        #
+        # hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss)
+        # hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf)
 
         #
         # # Note: SSIM Loss
@@ -1442,7 +1449,17 @@ class teacher(nn.Module):
         # NCA Criticality loss
         target_variance = torch.full_like(nca_var,0.49,requires_grad=True)
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
-        #
+
+        # Sinkhorn Loss
+        pred_cat = torch.stack([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1),pred_a.unsqueeze(1),pred_s.unsqueeze(1)], dim=1).flatten(start_dim=2)
+        true_cat = torch.stack([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1),a_out.unsqueeze(1),s_out.unsqueeze(1)], dim=1).flatten(start_dim=2)
+        sink_loss = torch.mean(self.sinkhorn_loss(t.unsqueeze(1).unsqueeze(2) * pred_cat + t_1.unsqueeze(1).unsqueeze(2) * true_cat, true_cat))
+
+        # KL Div LOSS
+        pred_distribution = torch.nn.functional.softmax(pred_cat, dim=-1)
+        target_distribution = torch.nn.functional.softmax(true_cat, dim=-1)
+        kl_loss = torch.nn.functional.kl_div(pred_distribution, target_distribution, reduction="batchmean")
+
         # # Reconstruction loss
         # reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)
         # rec_loss = reconstruction_loss.mean()
@@ -1489,8 +1506,8 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-        final_loss =  critical_loss+ortho_mean*1e-1+torch.mean(diff_loss)*1e1+torch.mean(hist_loss)*1e-5+torch.mean(fft_loss)*1e3+torch.mean(value_loss)+torch.mean(hist_loss_pdf)*1e5#rec_loss*1e1
-        return final_loss
+        final_loss =  kl_loss+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
+        return final_loss*1e-2
 
     @staticmethod
     def seed_setter(seed):

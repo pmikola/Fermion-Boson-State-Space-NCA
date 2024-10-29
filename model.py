@@ -24,31 +24,56 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.uplift_meta = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=3,stride=1,padding=1)
 
-        self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
-        self.cross_correlate_out = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1)
+        self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
+        self.cross_correlate_out = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
 
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
-        self.downlif_data = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
-        self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.a = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.s = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.downlif_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
+        self.r = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        self.g = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        self.b = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        self.a = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        self.s = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
         self.init_weights()
 
-    def init_weights(self):
+    def init_weights(self, seed: int = None):
+        if seed is not None:
+            torch.manual_seed(seed)
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.00)
-            elif isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out',
+                                        nonlinearity='relu')
                 if m.bias is not None:
-                    m.bias.data.fill_(0.00)
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.Conv3d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_out',
+                                         nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.GRU) or isinstance(m, nn.LSTM):
+                for name, param in m.named_parameters():
+                    if 'weight_ih' in name:
+                        nn.init.xavier_uniform_(param)
+                    elif 'weight_hh' in name:
+                        nn.init.orthogonal_(param)
+                    elif 'bias' in name:
+                        nn.init.constant_(param, 0.0)
+
+        print("Weight initialization complete")
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
@@ -89,18 +114,17 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.uplift_data(data))
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_in(x))
-        x = x.squeeze(1)
         x,nca_var,ortho_mean,ortho_max = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
+
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_out(x))
-        x = x.squeeze(1)
         x = self.act(self.downlif_data(x))
 
-        r = self.r(x).squeeze()
-        g = self.g(x).squeeze()
-        b = self.b(x).squeeze()
-        a = self.a(x).squeeze()
-        s = self.s(x).squeeze()
+        r = self.r(x[:,0,:,:,:]).squeeze()
+        g = self.g(x[:,1,:,:,:]).squeeze()
+        b = self.b(x[:,2,:,:,:]).squeeze()
+        a = self.a(x[:,3,:,:,:]).squeeze()
+        s = self.s(x[:,4,:,:,:]).squeeze()
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()
