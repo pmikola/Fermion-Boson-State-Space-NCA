@@ -19,7 +19,6 @@ from torch.autograd import grad
 import torch.nn.utils as nn_utils
 import torch.nn.functional as f
 
-
 class teacher(nn.Module):
     def __init__(self, model, device):
         # TODO: NOT MACIEK
@@ -255,7 +254,7 @@ class teacher(nn.Module):
             fmot_coef_binary = [int(fmot_coef_binary[i], 2) for i in range(0, len(fmot_coef_binary), 1)]
             fmot_coef_binary = torch.tensor(np.array(fmot_coef_binary)).to(self.device)
 
-            idx_input = random.choice(range(0, self.n_frames))
+            idx_input = random.choice(range(0, self.n_frames-1))
             central_point_x_in = random.sample(x_range, 1)[0]
             central_point_y_in = random.sample(y_range, 1)[0]
             window_x_in = np.array(
@@ -269,11 +268,11 @@ class teacher(nn.Module):
             slice_x_in = slice(window_x_in[0], window_x_in[-1] + 1)
             slice_y_in = slice(window_y_in[0], window_y_in[-1] + 1)
 
-            idx_output = random.choice(range(0, self.n_frames))
+            idx_output =idx_input+1 #random.choice(range(0, self.n_frames))
             offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
             offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in  + offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
-            central_point_y_out = central_point_y_in  + offset_y
+            central_point_x_out = central_point_x_in  #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
+            central_point_y_out = central_point_y_in  #+ offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -742,7 +741,9 @@ class teacher(nn.Module):
                 # time.sleep(1000)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
-            print(f'Pred Time: {t * 1e3:.1f} [ms]')
+            gpu_stats = gpustat.GPUStatCollection.new_query()
+            mem_usage = [gpu.memory_used for gpu in gpu_stats]
+            print(f'Pred Time: {t * 1e3:.1f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
             g_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -1145,7 +1146,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 100:
+                    if reiterate_counter > 30:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -1161,7 +1162,7 @@ class teacher(nn.Module):
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = param_group['lr'] * 0.99
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
-                                param_group['lr'] = 1e-3
+                                param_group['lr'] = 5e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
@@ -1232,11 +1233,32 @@ class teacher(nn.Module):
         a_in = data_input[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]
         s_in = structure_input[idx]
 
+        # Note: multitask contrast loss
+        mask = torch.full_like(pred_r,0).to(self.device)
+        index_pool = torch.cartesian_prod(torch.arange(0, self.batch_size, 1), torch.arange(0, 5, 1)).int()
+        r_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
+        g_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
+        b_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
+        a_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
+        s_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
+        pred_r[index_pool[r_z_idx]] = mask[index_pool[r_z_idx]]
+        pred_g[index_pool[g_z_idx]] = mask[index_pool[g_z_idx]]
+        pred_b[index_pool[b_z_idx]] = mask[index_pool[b_z_idx]]
+        pred_a[index_pool[a_z_idx]] = mask[index_pool[a_z_idx]]
+        pred_s[index_pool[s_z_idx]] = mask[index_pool[s_z_idx]]
+
         r_out = data_output[:, 0:self.model.in_scale, :][idx]
         g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]  #.view(self.batch_size, -1)
         b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]  #.view(self.batch_size, -1)
         a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]  #.view(self.batch_size, -1)
         s_out = structure_output[idx]  #.view(self.batch_size, -1)
+
+        r_out[index_pool[r_z_idx]] = mask[index_pool[r_z_idx]]
+        g_out[index_pool[g_z_idx]] = mask[index_pool[g_z_idx]]
+        b_out[index_pool[b_z_idx]] = mask[index_pool[b_z_idx]]
+        a_out[index_pool[a_z_idx]] = mask[index_pool[a_z_idx]]
+        s_out[index_pool[s_z_idx]] = mask[index_pool[s_z_idx]]
+
         t = 1 - self.fmot_in[idx]
         t_1 = self.fmot_in[idx]
         t = tt = t.unsqueeze(1)
@@ -1456,9 +1478,14 @@ class teacher(nn.Module):
         sink_loss = torch.mean(self.sinkhorn_loss(t.unsqueeze(1).unsqueeze(2) * pred_cat + t_1.unsqueeze(1).unsqueeze(2) * true_cat, true_cat))
 
         # KL Div LOSS
-        pred_distribution = torch.nn.functional.softmax(pred_cat, dim=-1)
-        target_distribution = torch.nn.functional.softmax(true_cat, dim=-1)
-        kl_loss = torch.nn.functional.kl_div(pred_distribution, target_distribution, reduction="batchmean")
+        pred_distribution = f.softmax(pred_cat, dim=-1)
+        target_distribution = f.softmax(true_cat, dim=-1)
+        kl_loss = f.kl_div(pred_distribution, target_distribution, reduction="batchmean",log_target=True)
+
+        # ELBO Prior Distribution
+        # mu = torch.zeros_like(pred_r).to(self.device)
+        # log_var = torch.ones_like(pred_r).to(self.device)
+        # kl_div_optimal_penalty = torch.sum(torch.relu(0.5 * (mu.pow(2) + log_var.exp() - 1 - log_var)))
 
         # # Reconstruction loss
         # reconstruction_loss = self.reconstruction_loss(criterion, self.device, 8)

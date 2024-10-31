@@ -23,20 +23,20 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.uplift_meta_1 = nn.Linear(15*self.modes, 5 * self.in_scale ** 2)
         self.uplift_meta = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=3,stride=1,padding=1)
-
         self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
-        self.cross_correlate_out = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
-
+        self.cross_correlate_out = nn.Conv3d(in_channels=self.hdc_dim, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
-        self.downlif_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
-        self.r = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.g = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.b = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.a = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.s = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=1)
+        self.rgbas = nn.Conv3d(in_channels=5,out_channels=1,kernel_size=1)
+        self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.a = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.s = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+
         self.init_weights()
 
     def init_weights(self, seed: int = None):
@@ -116,15 +116,15 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.cross_correlate_in(x))
         x,nca_var,ortho_mean,ortho_max = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
 
-        x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_out(x))
-        x = self.act(self.downlif_data(x))
+        x = self.act(self.downlift_data(x))
+        rgbas = self.act(self.rgbas(x).squeeze(1))
+        r = self.r(rgbas[:, 0, :, :])
+        g = self.g(rgbas[:, 1, :, :])
+        b = self.b(rgbas[:, 2, :, :])
+        a = self.a(rgbas[:, 3, :, :])
+        s = self.s(rgbas[:, 4, :, :])
 
-        r = self.r(x[:,0,:,:,:]).squeeze()
-        g = self.g(x[:,1,:,:,:]).squeeze()
-        b = self.b(x[:,2,:,:,:]).squeeze()
-        a = self.a(x[:,3,:,:,:]).squeeze()
-        s = self.s(x[:,4,:,:,:]).squeeze()
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()
