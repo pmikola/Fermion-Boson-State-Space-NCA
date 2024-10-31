@@ -72,7 +72,6 @@ class NCA(nn.Module):
         # self.act = nn.GELU()
         self.step_param = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
-        self.residual_weights = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
 
     def nca_update(self, x,meta_embeddings,spiking_probabilities,batch_size):
         self.batch_size = batch_size
@@ -85,33 +84,25 @@ class NCA(nn.Module):
             if self.training:
 
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
-
                 fermion_kernels = self.act(self.fermion_features(reshaped_energy_spectrum))
-
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 # fermion_kernels = fermion_kernels.flatten(start_dim=1)
-
                 boson_kernels = self.act(self.boson_features(reshaped_energy_spectrum))
                 # boson_kernels = boson_kernels.flatten(start_dim=1)
-
                 fermion_kernels = self.act(self.project_fermions(fermion_kernels))
                 boson_kernels = self.act(self.project_bosons(boson_kernels))
                 # fermion_kernels = torch.sum(torch.nn.functional.softplus(fermion_kernels), dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
                 # boson_kernels = torch.sum(torch.nn.functional.softplus(boson_kernels), dim=0).view(self.particle_number,self.channels, self.kernel_size, self.kernel_size)
                 fermion_kernels = fermion_kernels.mean(dim=0).view(self.particle_number,self.channels,self.kernel_size, self.kernel_size, self.kernel_size)
                 boson_kernels = boson_kernels.mean(dim=0).view(self.particle_number,self.channels,self.kernel_size, self.kernel_size, self.kernel_size)
-
                 fermionic_response = self.fermionic_NCA(energy_spectrum,meta_embeddings, weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
-
                 bosonic_response = self.bosonic_NCA(fermion_energy_states,meta_embeddings, weights=boson_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
 
                 energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
                                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
-                                                     self.spike_scale[i] +
-                                                     bosonic_energy_states * self.residual_weights[
-                                                         i])  # Note: Progressing NCA dynamics by dx
+                                                     self.spike_scale[i])  # Note: Progressing NCA dynamics by dx
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3, 4],unbiased=False)
                 #energy_spectrum = torch.clamp(energy_spectrum, min=self.clamp_low, max=self.clamp_high)
                 with torch.no_grad():
@@ -120,16 +111,11 @@ class NCA(nn.Module):
             else:
                 fermion_kernels = self.learned_fermion_kernels[i]
                 boson_kernels = self.learned_boson_kernels[i]
-
                 fermionic_response = self.fermionic_NCA(energy_spectrum,meta_embeddings,weights=fermion_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
-
                 bosonic_response = self.bosonic_NCA(fermion_energy_states,meta_embeddings, weights=boson_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-
-                energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
-                     torch.rand_like(bosonic_energy_states) * spiking_probabilities[i]*self.spike_scale[i] +
-                     bosonic_energy_states*self.residual_weights[i]) # Note: Progressing NCA dynamics by dx
+                energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i]) # Note: Progressing NCA dynamics by dx
 
                 nca_var, ortho_mean, ortho_max = None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
@@ -156,14 +142,17 @@ class NCA(nn.Module):
 class FermionConvLayer(nn.Module):
     def __init__(self, channels, kernel_size=3):
         super(FermionConvLayer, self).__init__()
-        self.fermion_gate = nn.Conv3d(channels, channels, kernel_size=1, bias=True)  # Convolutional gate
+        self.fermion_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)  # Convolutional gate
+        self.fermion_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)  # Convolutional gate
+
         self.act = nn.ELU(alpha=2.)
         self.kernel_size= kernel_size
 
     def forward(self, x,meta, weights):
         f_o = self.act(torch.nn.functional.conv3d(x, weights, padding=self.kernel_size//2 ))
         gating_input = torch.mean(x+meta.unsqueeze(1), dim=[2, 3], keepdim=True)
-        gate = torch.sigmoid(self.fermion_gate(gating_input))
+        gate = torch.sigmoid(self.fermion_gate_0(gating_input))
+        gate = torch.sigmoid(self.fermion_gate_1(gate))
         gated_output = f_o * gate
         return gated_output
 
@@ -171,13 +160,15 @@ class FermionConvLayer(nn.Module):
 class BosonConvLayer(nn.Module):
     def __init__(self, channels, kernel_size=3):
         super(BosonConvLayer, self).__init__()
-        self.boson_gate = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.boson_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.boson_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         self.act = nn.ELU(alpha=2.)
         self.kernel_size = kernel_size
 
     def forward(self, x,meta, weights):
         b_o = self.act(torch.nn.functional.conv3d(x, weights, padding=self.kernel_size // 2))
         gating_input = torch.mean(x+meta.unsqueeze(1), dim=[2, 3], keepdim=True)
-        gate = torch.tanh(self.boson_gate(gating_input))
+        gate = self.act(self.boson_gate_0(gating_input))
+        gate = self.act(self.boson_gate_1(gate))
         gated_output = b_o * gate
         return gated_output
