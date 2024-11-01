@@ -494,7 +494,7 @@ class teacher(nn.Module):
 
         for name in folder_names:
             if os.path.exists(name):
-                for i in range(self.first_frame, self.last_frame, self.frame_skip // 2):
+                for i in range(self.first_frame, self.last_frame, self.frame_skip):
                     if name == 'rgb':
                         ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
                         for j in range(0, 3):
@@ -805,7 +805,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=30,dpi=200)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=200)
 
         plt.show()
 
@@ -1085,7 +1085,7 @@ class teacher(nn.Module):
             for epoch in range(num_epochs):
                 self.epoch = epoch
                 t_epoch_start = time.perf_counter()
-                #self.seed_setter(int(epoch + 1))
+                self.seed_setter(int(epoch + 1))
                 if reiterate_data == 0:
                     self.data_preparation()
                     print("new sets of data prepared!")
@@ -1111,8 +1111,8 @@ class teacher(nn.Module):
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                clip_value = 10.
-                nn_utils.clip_grad_norm_(self.model.parameters(), clip_value)
+                # clip_value = 10.
+                # nn_utils.clip_grad_norm_(self.model.parameters(), clip_value)
                 # for param in model.parameters():
                 #     param.data.clamp_(-2, 2)
                 optimizer.step()
@@ -1526,15 +1526,15 @@ class teacher(nn.Module):
         # total energy =
         # energy_loss = torch.abs()
 
-        # Entropy loss
+        # Entropy matched loss
         entropy_loss = 0
         for i in range(0,5):
             p_pred = torch.nn.functional.softmax(pred_cat[: , i].flatten(), dim=0)
             p_true = torch.nn.functional.softmax(true_cat[: , i].flatten(), dim=0)
             entropy_pred = -torch.sum(p_pred * torch.log(p_pred + 1e-9))
             entropy_true = -torch.sum(p_true * torch.log(p_true + 1e-9))
-            entropy_loss += -entropy_pred + entropy_true
-        entropy_loss = - entropy_loss
+            entropy_loss +=torch.abs(entropy_pred - entropy_true)
+
         # ELBO Prior Distribution
         # mu = torch.zeros_like(pred_r).to(self.device)
         # log_var = torch.ones_like(pred_r).to(self.device)

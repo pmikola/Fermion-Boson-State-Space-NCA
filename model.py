@@ -135,6 +135,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         a_in = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s_in = structure_input.unsqueeze(1)
         data = torch.cat([r_in,g_in,b_in,a_in,s_in],dim=1)
+
         time_in,time_out = meta_input_h2,meta_output_h2
         pos_in,pos_out = meta_input_h3,meta_output_h3
 
@@ -160,18 +161,18 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         a = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  3, :, :].squeeze(1))) for layer in self.a]), dim=0)
         s = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  4, :, :].squeeze(1))) for layer in self.s]), dim=0)
 
-        r = self.r_norm(r)
-        g = self.g_norm(g)
-        b = self.b_norm(b)
-        a = self.a_norm(a)
-        s = self.s_norm(s)
-
         # Note: Self adjusting feedback loop
         r = r - self.feedback_weights[0] * (g + b + a + s) - r_in * self.feedback_weights[5]
         g = g - self.feedback_weights[1] * (r + b + a + s) - g_in * self.feedback_weights[6]
         b = b - self.feedback_weights[2] * (r + g + a + s) - b_in * self.feedback_weights[7]
         a = a - self.feedback_weights[3] * (r + g + b + s) - a_in * self.feedback_weights[8]
         s = s - self.feedback_weights[4] * (r + g + b + a) - s_in * self.feedback_weights[9]
+
+        r = self.r_norm(r)
+        g = self.g_norm(g)
+        b = self.b_norm(b)
+        a = self.a_norm(a)
+        s = self.s_norm(s)
 
         r = self.act(self.r_h(r))
         g = self.act(self.g_h(g))
