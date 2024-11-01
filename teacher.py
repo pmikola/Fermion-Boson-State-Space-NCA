@@ -396,7 +396,7 @@ class teacher(nn.Module):
 
             mod = 4
 
-            if self.epoch > self.num_of_epochs * 0.05 or create_val_dataset == 1:
+            if self.epoch > self.num_of_epochs * 0.25 or create_val_dataset == 1:
                 pass
             else:
                 data_in_cnz = torch.count_nonzero(data_input_subslice)
@@ -743,7 +743,8 @@ class teacher(nn.Module):
             t = t_pred - t_start
             gpu_stats = gpustat.GPUStatCollection.new_query()
             mem_usage = [gpu.memory_used for gpu in gpu_stats]
-            print(f'Pred Time: {t * 1e3:.1f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]')
+            print(f'Pred Time: {t * 1e3:.1f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]',
+                  f'CPU TEMP: {WinTmp.CPU_Temp()} [°C], ', f'GPU TEMP: {WinTmp.GPU_Temp()} [°C], ')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
             g_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -800,8 +801,8 @@ class teacher(nn.Module):
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
             #log_w_stat = np.log10(w_stat + 1e-10) # Note : for positive val only
-            log_w_stat = np.log10(np.abs(w_stat) + 1e-10)*np.sign(w_stat)
-            w_static = ax4.imshow(log_w_stat, cmap='seismic')
+            #log_w_stat = np.log10(np.abs(w_stat) + 1e-10)*np.sign(w_stat)
+            w_static = ax4.imshow(w_stat, cmap='seismic')
             ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, w_static, title_pred, title_true, title_rms])
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
@@ -1235,17 +1236,48 @@ class teacher(nn.Module):
 
         # Note: multitask contrast loss
         mask = torch.full_like(pred_r,0).to(self.device)
-        index_pool = torch.cartesian_prod(torch.arange(0, self.batch_size, 1), torch.arange(0, 5, 1)).int()
-        r_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
-        g_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
-        b_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
-        a_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
-        s_z_idx = torch.randperm(index_pool.shape[0])[:self.batch_size]
-        pred_r[index_pool[r_z_idx]] = mask[index_pool[r_z_idx]]
-        pred_g[index_pool[g_z_idx]] = mask[index_pool[g_z_idx]]
-        pred_b[index_pool[b_z_idx]] = mask[index_pool[b_z_idx]]
-        pred_a[index_pool[a_z_idx]] = mask[index_pool[a_z_idx]]
-        pred_s[index_pool[s_z_idx]] = mask[index_pool[s_z_idx]]
+        b_idx_pool = torch.arange(0, self.batch_size, 1)
+        c_idx_pool = torch.cartesian_prod(b_idx_pool, torch.arange(0, self.model.in_scale, 1)).int()
+        b_idx_pool = b_idx_pool.int()
+        l = self.batch_size // 5
+        k = self.batch_size*2
+        if self.epoch > self.num_of_epochs*0.05:
+            k = k // 4
+            l = l // 2
+        elif self.epoch > self.num_of_epochs*0.3:
+            k = k // 8
+            l = l // 4
+        elif self.epoch > self.num_of_epochs*0.5:
+            k = k // 64
+            l = l // 16
+        elif self.epoch > self.num_of_epochs*0.8:
+            k = k // 128
+            l = l // 32
+        else:pass
+
+        r_c_idx = torch.randperm(c_idx_pool.shape[0])[:k]
+        g_c_idx = torch.randperm(c_idx_pool.shape[0])[:k]
+        b_c_idx = torch.randperm(c_idx_pool.shape[0])[:k]
+        a_c_idx = torch.randperm(c_idx_pool.shape[0])[:k]
+        s_c_idx = torch.randperm(c_idx_pool.shape[0])[:k]
+
+        r_b_idx = torch.randperm(b_idx_pool.shape[0])[:l]
+        g_b_idx = torch.randperm(b_idx_pool.shape[0])[:l]
+        b_b_idx = torch.randperm(b_idx_pool.shape[0])[:l]
+        a_b_idx = torch.randperm(b_idx_pool.shape[0])[:l]
+        s_b_idx = torch.randperm(b_idx_pool.shape[0])[:l]
+
+        pred_r[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
+        pred_g[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
+        pred_b[c_idx_pool[b_c_idx]] = mask[c_idx_pool[b_c_idx]]
+        pred_a[c_idx_pool[a_c_idx]] = mask[c_idx_pool[a_c_idx]]
+        pred_s[c_idx_pool[s_c_idx]] = mask[c_idx_pool[s_c_idx]]
+
+        pred_r[b_idx_pool[r_b_idx]] = mask[b_idx_pool[r_b_idx]]
+        pred_g[b_idx_pool[g_b_idx]] = mask[b_idx_pool[g_b_idx]]
+        pred_b[b_idx_pool[b_b_idx]] = mask[b_idx_pool[b_b_idx]]
+        pred_a[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
+        pred_s[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
 
         r_out = data_output[:, 0:self.model.in_scale, :][idx]
         g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]  #.view(self.batch_size, -1)
@@ -1253,11 +1285,17 @@ class teacher(nn.Module):
         a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]  #.view(self.batch_size, -1)
         s_out = structure_output[idx]  #.view(self.batch_size, -1)
 
-        r_out[index_pool[r_z_idx]] = mask[index_pool[r_z_idx]]
-        g_out[index_pool[g_z_idx]] = mask[index_pool[g_z_idx]]
-        b_out[index_pool[b_z_idx]] = mask[index_pool[b_z_idx]]
-        a_out[index_pool[a_z_idx]] = mask[index_pool[a_z_idx]]
-        s_out[index_pool[s_z_idx]] = mask[index_pool[s_z_idx]]
+        r_out[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
+        g_out[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
+        b_out[c_idx_pool[b_c_idx]] = mask[c_idx_pool[b_c_idx]]
+        a_out[c_idx_pool[a_c_idx]] = mask[c_idx_pool[a_c_idx]]
+        s_out[c_idx_pool[s_c_idx]] = mask[c_idx_pool[s_c_idx]]
+
+        r_out[b_idx_pool[r_b_idx]] = mask[b_idx_pool[r_b_idx]]
+        g_out[b_idx_pool[g_b_idx]] = mask[b_idx_pool[g_b_idx]]
+        b_out[b_idx_pool[b_b_idx]] = mask[b_idx_pool[b_b_idx]]
+        a_out[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
+        s_out[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
 
         t = 1 - self.fmot_in[idx]
         t_1 = self.fmot_in[idx]

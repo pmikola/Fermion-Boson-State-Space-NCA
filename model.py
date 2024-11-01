@@ -50,17 +50,17 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
 
             elif isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.orthogonal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
             elif isinstance(m, nn.Conv3d):
-                nn.init.kaiming_uniform_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.orthogonal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
             elif isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                nn.init.orthogonal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
@@ -79,7 +79,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
                         if submodule.bias is not None:
                             nn.init.constant_(submodule.bias, 0.0)
                     elif isinstance(submodule, nn.Conv2d):
-                        nn.init.kaiming_normal_(submodule.weight, mode='fan_out', nonlinearity='relu')
+                        nn.init.orthogonal_(submodule.weight)
                         if submodule.bias is not None:
                             nn.init.constant_(submodule.bias, 0.0)
 
