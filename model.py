@@ -33,12 +33,30 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
         self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
-        self.r = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.g = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.b = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.a = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
-        self.s = nn.Conv2d(in_channels=self.hdc_dim, out_channels=1, kernel_size=1)
+        # [1, 3, 5, 7, 9, 11, 13, 15]
+        self.r = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5]])
+        self.g = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5]])
+        self.b = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5]])
+        self.a = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5]])
+        self.s = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5]])
         self.init_weights()
+
+        self.r_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.g_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.b_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.a_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.s_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+
+        self.r_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.g_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.b_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.a_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.s_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
 
     def init_weights(self, seed: int = None):
         if seed is not None:
@@ -129,11 +147,24 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.cross_correlate_out(x))
         x = self.act(self.downlift_data(x))
         rgbas = self.act(self.rgbas(x))
-        r = self.r(rgbas[:, :,  0, :, :].squeeze(1)).squeeze(1)
-        g = self.g(rgbas[:, :,  1, :, :].squeeze(1)).squeeze(1)
-        b = self.b(rgbas[:, :,  2, :, :].squeeze(1)).squeeze(1)
-        a = self.a(rgbas[:, :,  3, :, :].squeeze(1)).squeeze(1)
-        s = self.s(rgbas[:, :,  4, :, :].squeeze(1)).squeeze(1)
+
+        r = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  0, :, :].squeeze(1)).squeeze(1)) for layer in self.r]), dim=0)
+        g = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  1, :, :].squeeze(1)).squeeze(1)) for layer in self.g]), dim=0)
+        b = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  2, :, :].squeeze(1)).squeeze(1)) for layer in self.b]), dim=0)
+        a = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  3, :, :].squeeze(1)).squeeze(1)) for layer in self.a]), dim=0)
+        s = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  4, :, :].squeeze(1)).squeeze(1)) for layer in self.s]), dim=0)
+
+        r = self.act(self.r_h(r))
+        g = self.act(self.g_h(g))
+        b = self.act(self.b_h(b))
+        a = self.act(self.a_h(a))
+        s = self.act(self.s_h(s))
+
+        r = self.r_o(r)
+        g = self.g_o(g)
+        b = self.b_o(b)
+        a = self.a_o(a)
+        s = self.s_o(s)
 
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()

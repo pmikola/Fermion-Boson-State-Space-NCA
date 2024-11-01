@@ -1520,6 +1520,8 @@ class teacher(nn.Module):
         target_distribution = f.softmax(true_cat, dim=-1)
         kl_loss = f.kl_div(pred_distribution, target_distribution, reduction="batchmean",log_target=True)
 
+        grad_penalty = torch.mean(criterion.gradient_penalty(model))
+
         # ELBO Prior Distribution
         # mu = torch.zeros_like(pred_r).to(self.device)
         # log_var = torch.ones_like(pred_r).to(self.device)
@@ -1571,7 +1573,8 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-        final_loss =  kl_loss+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
+
+        final_loss =  grad_penalty+kl_loss+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
         return final_loss*1e-2
 
     @staticmethod
