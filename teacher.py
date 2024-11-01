@@ -485,69 +485,67 @@ class teacher(nn.Module):
         print("Final model no params:", no_params)
         spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
         # spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
-        if self.data_tensor is None:
-            folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
-                            'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
-            data_tensor = []
-            meta_tensor = []
-            meta_binary = []
-            field_names = []
+        folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
+                        'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
+        data_tensor = []
+        meta_tensor = []
+        meta_binary = []
+        field_names = []
 
-            for name in folder_names:
-                if os.path.exists(name):
-                    for i in range(self.first_frame, self.last_frame, self.frame_skip):
-                        if name == 'rgb':
-                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                            for j in range(0, 3):
-                                data_tensor.append(ptfile['data'][:, :, j] / 255.)
-                                meta_tensor.append(ptfile['metadata'])
-                                field_names.append(ptfile['name'])
-                        else:
-                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                            data_tensor.append(ptfile['data'])
+        for name in folder_names:
+            if os.path.exists(name):
+                for i in range(self.first_frame, self.last_frame, self.frame_skip // 2):
+                    if name == 'rgb':
+                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                        for j in range(0, 3):
+                            data_tensor.append(ptfile['data'][:, :, j] / 255.)
                             meta_tensor.append(ptfile['metadata'])
                             field_names.append(ptfile['name'])
+                    else:
+                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                        data_tensor.append(ptfile['data'])
+                        meta_tensor.append(ptfile['metadata'])
+                        field_names.append(ptfile['name'])
 
-            self.data_tensor = torch.stack(data_tensor, dim=0)
-            self.meta_tensor = torch.stack(meta_tensor, dim=0)
+        self.data_tensor = torch.stack(data_tensor, dim=0)
+        self.meta_tensor = torch.stack(meta_tensor, dim=0)
 
-            for i in range(self.meta_tensor.shape[0]):
-                meta_temp = []
-                for j in range(self.meta_tensor.shape[1]):
-                    binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
-                    # Note : '!f' The '!' ensures that
-                    #     it's in network byte order (big-endian) and the 'f' says that it should be
-                    #     packed as a float. Use d for double precision
-                    binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
-                    # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
-                    meta_temp.append(binary_var)
-                meta_binary.append(meta_temp)
-            self.meta_binary = torch.from_numpy(np.array(meta_binary))
-            self.field_names = field_names
-            fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
-            #frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
-            f_dens_pos = len(fdens_idx)
+        for i in range(self.meta_tensor.shape[0]):
+            meta_temp = []
+            for j in range(self.meta_tensor.shape[1]):
+                binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
+                # Note : '!f' The '!' ensures that
+                #     it's in network byte order (big-endian) and the 'f' says that it should be
+                #     packed as a float. Use d for double precision
+                binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
+                # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
+                meta_temp.append(binary_var)
+            meta_binary.append(meta_temp)
+        self.meta_binary = torch.from_numpy(np.array(meta_binary))
+        self.field_names = field_names
+        fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
+        #frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
+        f_dens_pos = len(fdens_idx)
 
-            #fdens_idx = fdens_idx[frame_samples]
-            rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
-            r_idx = rgb_idx[::3]  #[frame_samples]
-            g_idx = rgb_idx[::3] + 1  #[frame_samples]
-            b_idx = rgb_idx[::3] + 2  #[frame_samples]
-            alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  #[frame_samples]
-            fuel_slices = self.data_tensor[fdens_idx]
-            self.w = fuel_slices.shape[1]
-            self.h = fuel_slices.shape[2]
-            self.n_frames = fuel_slices.shape[0]
-            min_val = fuel_slices.min()
-            max_val = fuel_slices.max()
-            self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
-            self.r_slices = self.data_tensor[r_idx]
-            self.g_slices = self.data_tensor[g_idx]
-            self.b_slices = self.data_tensor[b_idx]
-            self.alpha_slices = self.data_tensor[alpha_idx]
-            self.meta_binary_slices = self.meta_binary[fdens_idx]
-        else:
-            pass
+        #fdens_idx = fdens_idx[frame_samples]
+        rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
+        r_idx = rgb_idx[::3]  #[frame_samples]
+        g_idx = rgb_idx[::3] + 1  #[frame_samples]
+        b_idx = rgb_idx[::3] + 2  #[frame_samples]
+        alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  #[frame_samples]
+        fuel_slices = self.data_tensor[fdens_idx]
+        self.w = fuel_slices.shape[1]
+        self.h = fuel_slices.shape[2]
+        self.n_frames = fuel_slices.shape[0]
+        min_val = fuel_slices.min()
+        max_val = fuel_slices.max()
+        self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
+        self.r_slices = self.data_tensor[r_idx]
+        self.g_slices = self.data_tensor[g_idx]
+        self.b_slices = self.data_tensor[b_idx]
+        self.alpha_slices = self.data_tensor[alpha_idx]
+        self.meta_binary_slices = self.meta_binary[fdens_idx]
+
 
         # Note: IDX preparation
         central_points_x = np.arange(self.input_window_size, self.w - self.input_window_size + 1)
@@ -743,7 +741,7 @@ class teacher(nn.Module):
             t = t_pred - t_start
             gpu_stats = gpustat.GPUStatCollection.new_query()
             mem_usage = [gpu.memory_used for gpu in gpu_stats]
-            print(f'Pred Time: {t * 1e3:.1f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]',
+            print(f'Pred Time: {t * 1e3:.2f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]',
                   f'CPU TEMP: {WinTmp.CPU_Temp()} [°C], ', f'GPU TEMP: {WinTmp.GPU_Temp()} [°C], ')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -807,7 +805,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=20,dpi=200)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=30,dpi=200)
 
         plt.show()
 
@@ -1113,8 +1111,10 @@ class teacher(nn.Module):
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                max_norm = 1.
-                #nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
+                clip_value = 10.
+                nn_utils.clip_grad_norm_(self.model.parameters(), clip_value)
+                # for param in model.parameters():
+                #     param.data.clamp_(-2, 2)
                 optimizer.step()
                 # if (epoch + 1) % 5 == 0:
 
@@ -1522,6 +1522,19 @@ class teacher(nn.Module):
 
         grad_penalty = torch.mean(criterion.gradient_penalty(model))
 
+        # Energy Conservation loss
+        # total energy =
+        # energy_loss = torch.abs()
+
+        # Entropy loss
+        entropy_loss = 0
+        for i in range(0,5):
+            p_pred = torch.nn.functional.softmax(pred_cat[: , i].flatten(), dim=0)
+            p_true = torch.nn.functional.softmax(true_cat[: , i].flatten(), dim=0)
+            entropy_pred = -torch.sum(p_pred * torch.log(p_pred + 1e-9))
+            entropy_true = -torch.sum(p_true * torch.log(p_true + 1e-9))
+            entropy_loss += -entropy_pred + entropy_true
+        entropy_loss = - entropy_loss
         # ELBO Prior Distribution
         # mu = torch.zeros_like(pred_r).to(self.device)
         # log_var = torch.ones_like(pred_r).to(self.device)
@@ -1574,7 +1587,7 @@ class teacher(nn.Module):
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
 
-        final_loss =  grad_penalty+kl_loss+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
+        final_loss =  entropy_loss+grad_penalty+2*kl_loss+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
         return final_loss*1e-2
 
     @staticmethod

@@ -43,4 +43,4 @@ class CustomLoss(nn.Module):
         else:
             weight_loss = torch.tensor(0.0, device=self.device)
         total_loss = grad_loss + weight_loss
-        return total_loss.unsqueeze(0).repeat(self.batch_size)
+        return total_loss
