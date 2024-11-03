@@ -1181,13 +1181,20 @@ class teacher(nn.Module):
                     mem_usage = [gpu.memory_used for gpu in gpu_stats]
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
+                    cpu_temp = WinTmp.CPU_Temp()
+                    gpu_temp = WinTmp.GPU_Temp()
+                    if cpu_temp <20:
+                        cpu_temp = self.cpu_temp[-2]
+                    if gpu_temp <20:
+                        gpu_temp = self.gpu_temp[-2]
+
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
                         f'vL: {val_loss.item():.6f}, '
                         f'mL: {loss.item():.6f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
-                        f'CPU TEMP: {WinTmp.CPU_Temp()} [°C], '
-                        f'GPU TEMP: {WinTmp.GPU_Temp()} [°C], '
+                        f'CPU TEMP: {cpu_temp} [°C], '
+                        f'GPU TEMP: {gpu_temp} [°C], '
                         f'GPU MEM: {round(mem_usage[0]*1e-3,3)} [GB] '
                     )
                     t = 0.
