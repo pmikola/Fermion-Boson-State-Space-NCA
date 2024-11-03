@@ -34,7 +34,8 @@ class NCA(nn.Module):
         self.bosonic_NCA = BosonConvLayer(channels=self.channels,propagation_steps = num_steps, kernel_size=self.kernel_size)
 
         # self.particle_features = Performer(dim=self.particle_number, dim_head=self.particle_number, depth=1, heads=self.particle_number)
-        self.dwt = DWTForward(J=3, wave='db2', mode='symmetric').to(self.device)
+        self.dwt_space = DWTForward(J=1, wave='db2', mode='periodization').to(self.device)
+        self.dwt_freq = DWTForward(J=5, wave='coif1', mode='periodization').to(self.device)
 
         self.fermion_features = Linformer(
             dim=self.feature_dim,
@@ -70,6 +71,7 @@ class NCA(nn.Module):
 
         self.lnorm_fermion = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
         self.lnorm_boson = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
+        self.wvl_layer_norm = nn.LayerNorm(self.feature_dim).to(self.device)
 
         self.learned_fermion_kernels = nn.ParameterList(
             [nn.Parameter(torch.randn(self.fermion_number,self.channels, self.kernel_size, self.kernel_size, self.kernel_size), requires_grad=False) for _ in range(num_steps)])
@@ -101,6 +103,7 @@ class NCA(nn.Module):
                 wh_2 = F.pad(wh_2,(0, self.target_seq_len - wh_2.size(-1)))
                 wl_0 = F.pad(wl_0,(0, self.target_seq_len - wl_0.size(-1)))
                 wavelet_space = torch.cat([wl_0,wh_0,wh_1,wh_2],dim=1).permute(0, 2, 1)
+                wavelet_space = self.wvl_layer_norm(wavelet_space)
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 # fermion_kernels = fermion_kernels.flatten(start_dim=1)

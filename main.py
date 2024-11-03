@@ -39,7 +39,7 @@ t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 criterion = CustomLoss(device)
-optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-2, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-6, amsgrad=True)
+optimizer = torch.optim.Adam(t.model.parameters(), lr=5e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
 
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch
@@ -55,7 +55,7 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip * 2, criterion, optimizer ,device, learning=1,
-                     num_epochs=16000)
+                     num_epochs=1000)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
 t.visualize_lerning(5)
