@@ -164,8 +164,8 @@ class NCA(nn.Module):
 class FermionConvLayer(nn.Module):
     def __init__(self, channels,propagation_steps, kernel_size=3):
         super(FermionConvLayer, self).__init__()
-        self.fermion_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)  # Convolutional gate
-        self.fermion_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)  # Convolutional gate
+        self.fermion_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.fermion_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
         self.act = nn.ELU(alpha=2.)
         self.kernel_size= kernel_size
