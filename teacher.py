@@ -1127,8 +1127,17 @@ class teacher(nn.Module):
 
                 self.train_loss.append(loss.item())
                 self.val_loss.append(val_loss.item())
-                self.cpu_temp.append(WinTmp.CPU_Temp())
-                self.gpu_temp.append(WinTmp.GPU_Temp())
+
+                cpu_temp = WinTmp.CPU_Temp()
+                gpu_temp = WinTmp.GPU_Temp()
+                if self.epoch > 3:
+                    if cpu_temp < 20:
+                        cpu_temp = self.cpu_temp[-2]
+                    if gpu_temp < 20:
+                        gpu_temp = self.gpu_temp[-2]
+
+                self.cpu_temp.append(cpu_temp)
+                self.gpu_temp.append(gpu_temp)
 
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
@@ -1181,12 +1190,7 @@ class teacher(nn.Module):
                     mem_usage = [gpu.memory_used for gpu in gpu_stats]
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
-                    cpu_temp = WinTmp.CPU_Temp()
-                    gpu_temp = WinTmp.GPU_Temp()
-                    if cpu_temp <20:
-                        cpu_temp = self.cpu_temp[-2]
-                    if gpu_temp <20:
-                        gpu_temp = self.gpu_temp[-2]
+
 
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '

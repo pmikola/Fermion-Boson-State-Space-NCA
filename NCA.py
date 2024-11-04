@@ -20,6 +20,7 @@ class NCA(nn.Module):
         self.channels = channels
         self.kernel_size = 3
         self.wavelet_scales = 5
+        self.max_wavelet_scale = 10
 
         self.nca_layers = nn.ModuleList([
             nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=k, stride=1, padding=k // 2)
@@ -29,10 +30,7 @@ class NCA(nn.Module):
         self.fermionic_NCA = FermionConvLayer(channels=self.channels,propagation_steps = num_steps, kernel_size=self.kernel_size)
         self.bosonic_NCA = BosonConvLayer(channels=self.channels,propagation_steps = num_steps, kernel_size=self.kernel_size)
 
-        # self.particle_features = Performer(dim=self.particle_number, dim_head=self.particle_number, depth=1, heads=self.particle_number)
-        # self.dwt_space = DWTForward(J=1, wave='db2', mode='periodization').to(self.device)
-        # self.dwt_freq = DWTForward(J=5, wave='coif1', mode='periodization').to(self.device)
-        self.wvl = WaveletModel(num_scales=self.wavelet_scales, max_scale_value=10,
+        self.wvl = WaveletModel(num_scales=self.wavelet_scales, max_scale_value=self.max_wavelet_scale,
                          batch_size=self.batch_size, channels=self.channels, height=self.patch_size_x, width=self.patch_size_y,device=self.device).to('cuda')
 
         self.fermion_features = Linformer(

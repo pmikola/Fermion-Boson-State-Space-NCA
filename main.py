@@ -4,6 +4,7 @@ import sys
 from os import path
 import numpy as np
 import torch
+import importlib.util
 from torch import nn
 from performer_pytorch import Performer
 from model import Fermionic_Bosonic_Space_State_NCA
@@ -11,7 +12,8 @@ from teacher import teacher
 from flameEngine import flame as fl
 from CustomLoss import CustomLoss
 import warnings
-
+import torchopt
+# from igt.torch_igt import IGTransporter
 # Start ................
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Computational Environment used : ",device)
@@ -39,8 +41,9 @@ t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 criterion = CustomLoss(device)
-optimizer = torch.optim.Adam(t.model.parameters(), lr=5e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
-
+optimizer = torchopt.Adam(t.model.parameters(), lr=5e-3) # High level api
+# optim = torchopt.Optimizer(net.parameters(), torchopt.adam(lr=learning_rate)) # low level api
+# Note : orginal # optimizer = torch.optim.Adam(t.model.parameters(), lr=5e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch
 no_periods = 1
@@ -55,7 +58,7 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip * 2, criterion, optimizer ,device, learning=1,
-                     num_epochs=15000)
+                     num_epochs=500)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
 t.visualize_lerning(5)

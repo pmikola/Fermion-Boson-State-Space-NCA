@@ -24,8 +24,8 @@ class WaveletModel(nn.Module):
     def cwt(self,x, scales, device="cuda"):
         fdim = x.shape[1]
         x= x.flatten(start_dim=2).type(torch.complex64)
-        time_steps = torch.arange(x.shape[-1], device=device)
-        morlet_wavelets = torch.stack([self.wavelet(time_steps, 1.0 / scale).unsqueeze(0) for scale in self.scales]).to(device).repeat(fdim,1,1)
+        space_steps = torch.arange(x.shape[-1], device=device)
+        morlet_wavelets = torch.stack([self.wavelet(space_steps, 1.0 / scale).unsqueeze(0) for scale in self.scales]).to(device).repeat(fdim,1,1)
         x = x.repeat(1,len(scales),1)
         cwt_result = F.conv1d(x, morlet_wavelets, padding="same", groups=fdim * len(scales))
         return cwt_result
