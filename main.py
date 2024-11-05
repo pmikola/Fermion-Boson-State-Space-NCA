@@ -18,6 +18,8 @@ import torchopt
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Computational Environment used : ",device)
 warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed.elastic")
+
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # torch.autograd.set_detect_anomaly(True) # Note : Tremendously slowing down program - Attention: Be careful!
 
@@ -41,9 +43,10 @@ t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
 
 criterion = CustomLoss(device)
-optimizer = torchopt.Adam(t.model.parameters(), lr=5e-3) # High level api
+# optimizer = torchopt.Adam(t.model.parameters(), lr=5e-3) # High level api
 # optim = torchopt.Optimizer(net.parameters(), torchopt.adam(lr=learning_rate)) # low level api
-# Note : orginal # optimizer = torch.optim.Adam(t.model.parameters(), lr=5e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
+# optimizer = torch.optim.SGD(t.model.parameters(), lr=5e-3, momentum=0.1, weight_decay=1e-4)
+optimizer = torch.optim.Adam(t.model.parameters(), lr=5e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch
 no_periods = 1
