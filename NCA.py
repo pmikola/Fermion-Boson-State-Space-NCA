@@ -19,7 +19,7 @@ class NCA(nn.Module):
         self.patch_size_y = 15
         self.channels = channels
         self.kernel_size = 3
-        self.wavelet_scales = 5
+        self.wavelet_scales = 7
         self.max_wavelet_scale = 2
         self.min_scale_value = self.max_wavelet_scale*0.1
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
