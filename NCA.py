@@ -20,8 +20,8 @@ class NCA(nn.Module):
         self.channels = channels
         self.kernel_size = 3
         self.wavelet_scales = 7
-        self.max_wavelet_scale = 2
-        self.min_scale_value = self.max_wavelet_scale*0.1
+        self.max_wavelet_scale = 10
+        self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
 
@@ -46,7 +46,7 @@ class NCA(nn.Module):
             one_kv_head = False,
             share_kv = False,
             reversible = True,
-            dropout = 0.05,
+            dropout = 0.00,
             k=self.patch_size_x * self.patch_size_y
         )
 
@@ -59,7 +59,7 @@ class NCA(nn.Module):
             one_kv_head=False,
             share_kv=False,
             reversible=True,
-            dropout=0.05,
+            dropout=0.00,
             k=self.patch_size_x * self.patch_size_y
         )
         self.project_fermions_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.fermion_number  * torch.sum(self.fermion_kernels_size**3)*self.channels,kernel_size=1)
@@ -101,7 +101,7 @@ class NCA(nn.Module):
             if self.training:
                 #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0],self.channels**2, self.patch_size_x , self.patch_size_y)
-                cwt_wvl = self.wvl(reshaped_energy_spectrum,i).permute(0,2,1)
+                cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
                 # cwt_wvl_real = cwt_wvl.real
                 #cwt_wvl_imag = cwt_wvl.imag
                 wavelet_space = self.wvl_layer_norm_r(cwt_wvl)#.unsqueeze(3)
@@ -135,7 +135,6 @@ class NCA(nn.Module):
                     h_idx = l_idx+(k_size ** 3).int()*self.channels
                     b_kernels.append(boson_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(), k_size.int(), k_size.int()))
                     l_idx = h_idx
-
 
                 fermionic_response = self.fermionic_NCA(energy_spectrum,meta_embeddings,i, weights=f_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
