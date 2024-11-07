@@ -71,8 +71,6 @@ class NCA(nn.Module):
         self.common_nca_pool_layer_norm = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y]).to(self.device)
         self.lnorm_fermion = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
         self.lnorm_boson = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
-        self.wvl_layer_norm_r = nn.LayerNorm(self.channels*self.particle_number*self.wavelet_scales).to(self.device)
-        self.wvl_layer_norm_i = nn.LayerNorm(self.channels*self.particle_number*self.wavelet_scales).to(self.device)
         self.wvl_layer_norm = nn.LayerNorm(self.channels*self.particle_number*self.wavelet_scales).to(self.device)
 
         self.learned_fermion_kernels = nn.ParameterList([
@@ -102,12 +100,7 @@ class NCA(nn.Module):
                 #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0],self.channels**2, self.patch_size_x , self.patch_size_y)
                 cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
-                # cwt_wvl_real = cwt_wvl.real
-                #cwt_wvl_imag = cwt_wvl.imag
-                wavelet_space = self.wvl_layer_norm_r(cwt_wvl)#.unsqueeze(3)
-                #cwt_wvl_imag = self.wvl_layer_norm_i(cwt_wvl_imag).unsqueeze(3)
-                #wavelet_space = torch.cat([cwt_wvl_real, cwt_wvl_imag], dim=3).view(self.batch_size,cwt_wvl.shape[1]*2,cwt_wvl.shape[2])
-                wavelet_space = self.wvl_layer_norm(wavelet_space)
+                wavelet_space = self.wvl_layer_norm(cwt_wvl)
 
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
