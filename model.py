@@ -3,13 +3,14 @@ import time
 
 import torch
 import torch.nn as nn
+from linformer import Linformer
 
 from NCA import NCA
 
 
-class HyperRadialNeuralFourierCelularAutomata(nn.Module):
+class Fermionic_Bosonic_Space_State_NCA(nn.Module):
     def __init__(self, batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_dim,nca_steps, device):
-        super(HyperRadialNeuralFourierCelularAutomata, self).__init__()
+        super(Fermionic_Bosonic_Space_State_NCA, self).__init__()
         self.last_frame = None
         self.device = device
         self.no_frame_samples = no_frame_samples
@@ -20,32 +21,93 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         self.in_scale = (1 + self.input_window_size * 2)
         self.loss_weights = nn.Parameter(torch.ones(12))
         self.modes = 32
-        self.uplift_meta_0 = nn.Linear(5*self.modes,10*self.modes)
-        self.uplift_meta_1 = nn.Linear(10*self.modes, 5 * self.in_scale ** 2)
-        self.compress_time = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
+        self.uplift_meta_0 = nn.Linear(200,15*self.modes)
+        self.uplift_meta_1 = nn.Linear(15*self.modes, 5 * self.in_scale ** 2)
+        self.uplift_meta = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=1)
+        self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
+        self.cross_correlate_out = nn.Conv3d(in_channels=self.hdc_dim, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=2.0)
         # self.act = nn.GELU()
-        self.NCA = NCA(self.hdc_dim,self.nca_steps,self.device)
-        self.compress_NCA_out = nn.Conv2d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3,stride=1,padding=1)
-        self.r = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.g = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.b = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.a = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
-        self.s = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
+        self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
+        self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
+        # [1, 3, 5, 7, 9, 11, 13, 15]
+        self.r = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.g = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.b = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.a = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.s = nn.ModuleList(
+            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.r_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+        self.g_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+        self.b_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+        self.a_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+        self.s_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+
+        self.r_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.g_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.b_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.a_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.s_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+
+        self.r_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.g_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.b_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.a_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.s_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        #self.feedback_weights = nn.Parameter(torch.rand(10))
         self.init_weights()
 
-    def init_weights(self):
+    def init_weights(self, seed: int = None):
+        if seed is not None:
+            torch.manual_seed(seed)
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.00)
-            elif isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.Conv2d):
+                nn.init.orthogonal_(m.weight)
                 if m.bias is not None:
-                    m.bias.data.fill_(0.00)
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.Conv3d):
+                nn.init.orthogonal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.Conv1d):
+                nn.init.orthogonal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+            elif isinstance(m, Linformer):
+                for submodule in m.modules():
+                    if isinstance(submodule, nn.Linear):
+                        nn.init.xavier_uniform_(submodule.weight)
+                        if submodule.bias is not None:
+                            nn.init.constant_(submodule.bias, 0.0)
+                    elif isinstance(submodule, nn.Conv2d):
+                        nn.init.orthogonal_(submodule.weight)
+                        if submodule.bias is not None:
+                            nn.init.constant_(submodule.bias, 0.0)
+
+        print("Weight initialization complete")
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
@@ -55,7 +117,7 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
         if isinstance(self, nn.Conv3d) or isinstance(self, nn.Linear):
             self.reset_parameters()
 
-    def forward(self, din,spiking_probabilities):
+    def forward(self, din,spiking_probabilities=None):
         #torch.cuda.synchronize()
         #t_start = time.perf_counter()
         old_batch_size = self.batch_size
@@ -64,40 +126,66 @@ class HyperRadialNeuralFourierCelularAutomata(nn.Module):
          meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = din
         if data_input.shape[0] != self.batch_size:
             self.batch_size = data_input.shape[0]
-
-
         #################################################################
         # s = torch.flatten(structure_input,start_dim=1)
         # data = torch.flatten(data_input,start_dim=1)
-        r = data_input[:, 0:self.in_scale, :].unsqueeze(1)
-        g = data_input[:, self.in_scale:self.in_scale * 2, :].unsqueeze(1)
-        b = data_input[:, self.in_scale * 2:self.in_scale * 3, :].unsqueeze(1)
-        a = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
-        s = structure_input.unsqueeze(1)
-        data = torch.cat([r,g,b,a,s],dim=1)
-        time_in,time_out = meta_input_h2,meta_output_h2
+        r_in = data_input[:, 0:self.in_scale, :].unsqueeze(1)
+        g_in = data_input[:, self.in_scale:self.in_scale * 2, :].unsqueeze(1)
+        b_in = data_input[:, self.in_scale * 2:self.in_scale * 3, :].unsqueeze(1)
+        a_in = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
+        s_in = structure_input.unsqueeze(1)
+        data = torch.cat([r_in,g_in,b_in,a_in,s_in],dim=1)
 
-        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out],dim=-1)
+        time_in,time_out = meta_input_h2,meta_output_h2
+        pos_in,pos_out = meta_input_h3,meta_output_h3
+
+        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out,pos_in,pos_out],dim=-1)
+        #print(meta_to_uplift.shape)
         meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
         meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
         meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)
-        meta_embeddings =  self.act(self.compress_time(meta_uplifted))
+        meta_embeddings =  self.act(self.uplift_meta(meta_uplifted))
 
         x = self.act(self.uplift_data(data))
-        x,nca_var = self.NCA(x,meta_embeddings,spiking_probabilities)
-        x = self.act(self.compress_NCA_out(x))
-        r = self.r(x).squeeze()
-        g = self.g(x).squeeze()
-        b = self.b(x).squeeze()
-        a = self.a(x).squeeze()
-        s = self.s(x).squeeze()
+        x = x.unsqueeze(1)
+        x = self.act(self.cross_correlate_in(x))
+        x,nca_var,ortho_mean,ortho_max = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
+
+        x = self.act(self.cross_correlate_out(x))
+        x = self.act(self.downlift_data(x))
+        rgbas = self.act(self.rgbas(x))
+
+        r = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  0, :, :].squeeze(1))) for layer in self.r]), dim=0)
+        g = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  1, :, :].squeeze(1))) for layer in self.g]), dim=0)
+        b = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  2, :, :].squeeze(1))) for layer in self.b]), dim=0)
+        a = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  3, :, :].squeeze(1))) for layer in self.a]), dim=0)
+        s = torch.sum(torch.stack([self.act(layer(rgbas[:, :,  4, :, :].squeeze(1))) for layer in self.s]), dim=0)
+
+        r = self.r_norm(r)
+        g = self.g_norm(g)
+        b = self.b_norm(b)
+        a = self.a_norm(a)
+        s = self.s_norm(s)
+
+        r = self.act(self.r_h(r))
+        g = self.act(self.g_h(g))
+        b = self.act(self.b_h(b))
+        a = self.act(self.a_h(a))
+        s = self.act(self.s_h(s))
+
+        r = self.r_o(r).squeeze(1)
+        g = self.g_o(g).squeeze(1)
+        b = self.b_o(b).squeeze(1)
+        a = self.a_o(a).squeeze(1)
+        s = self.s_o(s).squeeze(1)
+
         deepS = r, g, b, a, s
         #torch.cuda.current_stream().synchronize()
         #t_stop = time.perf_counter()
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         self.batch_size = old_batch_size
-        return r, g, b, a, s, deepS,nca_var,self.loss_weights
+        return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,self.loss_weights
 
     @staticmethod
     def binary(x, bits):

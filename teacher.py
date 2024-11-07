@@ -5,10 +5,12 @@ import random
 import struct
 import time
 from statistics import mean
-
 from torch import nn
-
-import ssim
+import gpustat
+from geomloss import SamplesLoss
+# import ssim
+from pytorch_msssim import SSIM, MS_SSIM
+import WinTmp
 import kornia
 import numpy as np
 import torch
@@ -16,7 +18,6 @@ from matplotlib import pyplot as plt, animation
 from torch.autograd import grad
 import torch.nn.utils as nn_utils
 import torch.nn.functional as f
-
 
 class teacher(nn.Module):
     def __init__(self, model, device):
@@ -35,7 +36,8 @@ class teacher(nn.Module):
         self.meta_binary = None
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
-        self.ssim_loss = ssim.MS_SSIM(data_range=1., channel=5, use_padding=True, window_size=1).to(self.device)
+        self.ssim_loss = SSIM(data_range=1., channel=5,nonnegative_ssim=True,K=(0.01, 0.1),win_size=7).to(self.device)
+        self.sinkhorn_loss = SamplesLoss("sinkhorn", p=2, blur=0.05)
 
         self.data_input = None
         self.structure_input = None  #torch.zeros((self.model.batch_size,self.model.in_scale,self.model.in_scale),requires_grad=True)
@@ -79,6 +81,19 @@ class teacher(nn.Module):
         self.num_of_epochs = 0
         self.train_loss = []
         self.val_loss = []
+        self.cpu_temp = []
+        self.gpu_temp = []
+        self.h = None
+        self.w = None
+        self.n_frames = None
+        self.fuel_slices = None
+        self.r_slices = None
+        self.g_slices = None
+        self.b_slices = None
+        self.alpha_slices = None
+        self.meta_binary_slices = None
+        self.loss_coeffs = torch.ones(5,requires_grad=False).to(self.device)
+
 
     def generate_structure(self):
         no_structure = random.randint(0, self.fsim.grid_size_y - self.fsim.N_boundary)
@@ -97,73 +112,78 @@ class teacher(nn.Module):
         pass
 
     def data_preparation(self, create_val_dataset=0):
-        folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
-                        'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
-        data_tensor = []
-        meta_tensor = []
-        meta_binary = []
-        field_names = []
-        for name in folder_names:
-            if os.path.exists(name):
-                for i in range(self.first_frame, self.last_frame, self.frame_skip):
-                    if name == 'rgb':
-                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                        for j in range(0, 3):
-                            data_tensor.append(ptfile['data'][:, :, j] / 255)
+        if self.data_tensor is None:
+            folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
+                            'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
+            data_tensor = []
+            meta_tensor = []
+            meta_binary = []
+            field_names = []
+
+            for name in folder_names:
+                if os.path.exists(name):
+                    for i in range(self.first_frame, self.last_frame, self.frame_skip):
+                        if name == 'rgb':
+                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                            for j in range(0, 3):
+                                data_tensor.append(ptfile['data'][:, :, j] / 255.)
+                                meta_tensor.append(ptfile['metadata'])
+                                field_names.append(ptfile['name'])
+                        else:
+                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                            data_tensor.append(ptfile['data'])
                             meta_tensor.append(ptfile['metadata'])
                             field_names.append(ptfile['name'])
-                    else:
-                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                        data_tensor.append(ptfile['data'])
-                        meta_tensor.append(ptfile['metadata'])
-                        field_names.append(ptfile['name'])
 
-        self.data_tensor = torch.stack(data_tensor, dim=0)
-        self.meta_tensor = torch.stack(meta_tensor, dim=0)
-        for i in range(self.meta_tensor.shape[0]):
-            meta_temp = []
-            for j in range(self.meta_tensor.shape[1]):
-                binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
-                # Note : '!f' The '!' ensures that
-                #     it's in network byte order (big-endian) and the 'f' says that it should be
-                #     packed as a float. Use d for double precision
-                binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
-                # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
-                meta_temp.append(binary_var)
-            meta_binary.append(meta_temp)
-        self.meta_binary = torch.from_numpy(np.array(meta_binary))
-        self.field_names = field_names
-        fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
-        frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
-        f_dens_pos = len(fdens_idx)
-        fdens_idx = frame_samples
-        # Attention! : RGB is not 000000,111111,222222 but 012,012,012,012...
-        rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
-        r_idx = rgb_idx[::3][frame_samples]
-        g_idx = (rgb_idx[::3] + 1)[frame_samples]
-        b_idx = (rgb_idx[::3] + 2)[frame_samples]
-        # fs = np.array(frame_samples)+150
+            self.data_tensor = torch.stack(data_tensor, dim=0)
+            self.meta_tensor = torch.stack(meta_tensor, dim=0)
 
-        alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])[frame_samples]
-        fuel_slices = self.data_tensor[fdens_idx]
-        min_val = fuel_slices.min()
-        max_val = fuel_slices.max()
-        fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-10)
+            for i in range(self.meta_tensor.shape[0]):
+                meta_temp = []
+                for j in range(self.meta_tensor.shape[1]):
+                    binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
+                    # Note : '!f' The '!' ensures that
+                    #     it's in network byte order (big-endian) and the 'f' says that it should be
+                    #     packed as a float. Use d for double precision
+                    binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
+                    # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
+                    meta_temp.append(binary_var)
+                meta_binary.append(meta_temp)
+            self.meta_binary = torch.from_numpy(np.array(meta_binary))
+            self.field_names = field_names
+            fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
+            # frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
+            f_dens_pos = len(fdens_idx)
 
-        r_slices = self.data_tensor[r_idx]
-        g_slices = self.data_tensor[g_idx]
-        b_slices = self.data_tensor[b_idx]
-        alpha_slices = self.data_tensor[alpha_idx]
-        meta_binary_slices = self.meta_binary[fdens_idx]
+            # fdens_idx = fdens_idx[frame_samples]
+            rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
+            r_idx = rgb_idx[::3]  # [frame_samples]
+            g_idx = rgb_idx[::3] + 1  # [frame_samples]
+            b_idx = rgb_idx[::3] + 2  # [frame_samples]
+            alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  # [frame_samples]
+            fuel_slices = self.data_tensor[fdens_idx]
+            self.w = fuel_slices.shape[1]
+            self.h = fuel_slices.shape[2]
+            self.n_frames = fuel_slices.shape[0]
+            min_val = fuel_slices.min()
+            max_val = fuel_slices.max()
+            self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
+            self.r_slices = self.data_tensor[r_idx]
+            self.g_slices = self.data_tensor[g_idx]
+            self.b_slices = self.data_tensor[b_idx]
+            self.alpha_slices = self.data_tensor[alpha_idx]
+            self.meta_binary_slices = self.meta_binary[fdens_idx]
+        else:
+            pass
 
         # gt = np.stack((r_slices[0].cpu().numpy(), g_slices[0].cpu().numpy(), b_slices[0].cpu().numpy()), axis=2)
         # print(gt.shape)
         # plt.imshow(gt.astype(np.uint8) , alpha=alpha_slices[0].cpu().numpy())
         # plt.show()
         x_range = range(self.fsim.N_boundary + self.input_window_size,
-                        fuel_slices[0].shape[0] - self.fsim.N_boundary - self.input_window_size)
+                        self.w - self.fsim.N_boundary - self.input_window_size)
         y_range = range(self.fsim.N_boundary + self.input_window_size,
-                        fuel_slices[0].shape[1] - self.fsim.N_boundary - self.input_window_size)
+                        self.h - self.fsim.N_boundary - self.input_window_size)
         data_input = []
         structure_input = []
         meta_input_h1 = []
@@ -230,12 +250,12 @@ class teacher(nn.Module):
                 noise_variance_out_binary = torch.tensor(np.array(noise_variance_out_binary)).to(self.device)
 
             # Note: Flow Matching OT Noise gen
-            fmot_coef = torch.rand(size=(1,))
+            fmot_coef = torch.rand(size=(1,))#torch.ones(size=(1,))
             fmot_coef_binary = ''.join(f'{c:08b}' for c in np.float32(fmot_coef).tobytes())
             fmot_coef_binary = [int(fmot_coef_binary[i], 2) for i in range(0, len(fmot_coef_binary), 1)]
             fmot_coef_binary = torch.tensor(np.array(fmot_coef_binary)).to(self.device)
 
-            idx_input = random.choice(range(0, fuel_slices.shape[0]))
+            idx_input = random.choice(range(0, self.n_frames-1))
             central_point_x_in = random.sample(x_range, 1)[0]
             central_point_y_in = random.sample(y_range, 1)[0]
             window_x_in = np.array(
@@ -249,11 +269,11 @@ class teacher(nn.Module):
             slice_x_in = slice(window_x_in[0], window_x_in[-1] + 1)
             slice_y_in = slice(window_y_in[0], window_y_in[-1] + 1)
 
-            idx_output = random.choice(range(0, fuel_slices.shape[0]))
+            idx_output =idx_input+1 #random.choice(range(0, self.n_frames))
             offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
             offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
-            central_point_y_out = central_point_y_in #+ offset_y
+            central_point_x_out = central_point_x_in  #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
+            central_point_y_out = central_point_y_in  #+ offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -267,62 +287,67 @@ class teacher(nn.Module):
             slice_y_out = slice(window_y_out[0], window_y_out[-1] + 1)
 
             # Note : Input data
-            fuel_subslice_in = fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(fuel_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            fuel_subslice_in = self.fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * torch.rand_like(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
+                    self.device),
                 nan=0.0)
-            r_subslice_in = r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            r_subslice_in = self.r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * torch.rand_like(self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0)
-            g_subslice_in = g_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            g_subslice_in = self.g_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * torch.rand_like(self.g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0)
-            b_subslice_in = b_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            b_subslice_in = self.b_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * torch.rand_like(self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0)
-            alpha_subslice_in = alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * torch.rand_like(alpha_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            alpha_subslice_in = self.alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * torch.rand_like(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
+                    self.device),
                 nan=0.0)
             data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=0)
 
-            meta_step_in = meta_binary_slices[idx_input][0]
+            meta_step_in = self.meta_binary_slices[idx_input][0]
             meta_step_in_numeric = self.meta_tensor[idx_input][0]
 
-            meta_fuel_initial_speed_in = meta_binary_slices[idx_input][1]
-            meta_fuel_cut_off_time_in = meta_binary_slices[idx_input][2]
-            meta_igni_time_in = meta_binary_slices[idx_input][3]
-            meta_ignition_temp_in = meta_binary_slices[idx_input][4]
-            meta_viscosity_in = meta_binary_slices[idx_input][14]
-            meta_diff_in = meta_binary_slices[idx_input][15]
+            meta_fuel_initial_speed_in = self.meta_binary_slices[idx_input][1]
+            meta_fuel_cut_off_time_in = self.meta_binary_slices[idx_input][2]
+            meta_igni_time_in = self.meta_binary_slices[idx_input][3]
+            meta_ignition_temp_in = self.meta_binary_slices[idx_input][4]
+            meta_viscosity_in = self.meta_binary_slices[idx_input][14]
+            meta_diff_in = self.meta_binary_slices[idx_input][15]
             meta_input_subslice = torch.cat([meta_step_in, meta_fuel_initial_speed_in,
                                              meta_fuel_cut_off_time_in, meta_igni_time_in,
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
 
             # Note : Output data
-            fuel_subslice_out = fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(fuel_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+            fuel_subslice_out = self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * torch.rand_like(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
-            r_subslice_out = r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(r_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+            r_subslice_out = self.r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * torch.rand_like(self.r_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
-            g_subslice_out = g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(g_slices[idx_output, slice_x_out, slice_y_out]).to(self.device),
+            g_subslice_out = self.g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * torch.rand_like(self.g_slices[idx_output, slice_x_out, slice_y_out]).to(
+                    self.device),
                 nan=0.0)
-            b_subslice_out = b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0)
-            alpha_subslice_out = alpha_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * torch.rand_like(alpha_slices[idx_output, slice_x_out, slice_y_out]).to(
+            b_subslice_out = self.b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * torch.rand_like(self.b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0)
+            alpha_subslice_out = self.alpha_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * torch.rand_like(self.alpha_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device), nan=0.0)
             data_output_subslice = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out],
                                              dim=0)
 
-            meta_step_out = meta_binary_slices[idx_output][0]
+            meta_step_out = self.meta_binary_slices[idx_output][0]
             meta_step_out_numeric = self.meta_tensor[idx_output][0]
-            meta_fuel_initial_speed_out = meta_binary_slices[idx_output][1]
-            meta_fuel_cut_off_time_out = meta_binary_slices[idx_output][2]
-            meta_igni_time_out = meta_binary_slices[idx_output][3]
-            meta_ignition_temp_out = meta_binary_slices[idx_output][4]
-            meta_viscosity_out = meta_binary_slices[idx_output][14]
-            meta_diff_out = meta_binary_slices[idx_output][15]
+            meta_fuel_initial_speed_out = self.meta_binary_slices[idx_output][1]
+            meta_fuel_cut_off_time_out = self.meta_binary_slices[idx_output][2]
+            meta_igni_time_out = self.meta_binary_slices[idx_output][3]
+            meta_ignition_temp_out = self.meta_binary_slices[idx_output][4]
+            meta_viscosity_out = self.meta_binary_slices[idx_output][14]
+            meta_diff_out = self.meta_binary_slices[idx_output][15]
             meta_output_subslice = torch.cat([meta_step_out, meta_fuel_initial_speed_out,
                                               meta_fuel_cut_off_time_out, meta_igni_time_out,
                                               meta_ignition_temp_out, meta_viscosity_out, meta_diff_out], dim=0)
@@ -371,7 +396,8 @@ class teacher(nn.Module):
                     choose_diffrent_frame = 1
 
             mod = 4
-            if self.epoch > self.num_of_epochs * 0.5 or create_val_dataset == 1:
+
+            if self.epoch > self.num_of_epochs * 0.25 or create_val_dataset == 1:
                 pass
             else:
                 data_in_cnz = torch.count_nonzero(data_input_subslice)
@@ -454,13 +480,18 @@ class teacher(nn.Module):
 
     def examine(self, criterion, device, plot=0):
         self.model.load_state_dict(torch.load('model.pt'))
+        # self.model.NCA.fermion_features = None
+        # self.model.NCA.boson_features = None
+        no_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print("Final model no params:", no_params)
+        spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+        # spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
         folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
                         'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
         data_tensor = []
         meta_tensor = []
         meta_binary = []
         field_names = []
-        spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
 
         for name in folder_names:
             if os.path.exists(name):
@@ -504,19 +535,22 @@ class teacher(nn.Module):
         b_idx = rgb_idx[::3] + 2  #[frame_samples]
         alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  #[frame_samples]
         fuel_slices = self.data_tensor[fdens_idx]
+        self.w = fuel_slices.shape[1]
+        self.h = fuel_slices.shape[2]
+        self.n_frames = fuel_slices.shape[0]
         min_val = fuel_slices.min()
         max_val = fuel_slices.max()
-        fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
+        self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
+        self.r_slices = self.data_tensor[r_idx]
+        self.g_slices = self.data_tensor[g_idx]
+        self.b_slices = self.data_tensor[b_idx]
+        self.alpha_slices = self.data_tensor[alpha_idx]
+        self.meta_binary_slices = self.meta_binary[fdens_idx]
 
-        r_slices = self.data_tensor[r_idx]
-        g_slices = self.data_tensor[g_idx]
-        b_slices = self.data_tensor[b_idx]
-        alpha_slices = self.data_tensor[alpha_idx]
-        meta_binary_slices = self.meta_binary[fdens_idx]
 
         # Note: IDX preparation
-        central_points_x = np.arange(self.input_window_size, fuel_slices.shape[1] - self.input_window_size + 1)
-        central_points_y = np.arange(self.input_window_size, fuel_slices.shape[2] - self.input_window_size + 1)
+        central_points_x = np.arange(self.input_window_size, self.w - self.input_window_size + 1)
+        central_points_y = np.arange(self.input_window_size, self.h - self.input_window_size + 1)
 
         central_points_x_pos = central_points_x + self.input_window_size
         central_points_x_neg = central_points_x - self.input_window_size
@@ -567,25 +601,25 @@ class teacher(nn.Module):
         ax1 = plt.subplot2grid(grid, (0, 0))
         ax2 = plt.subplot2grid(grid, (0, 1))
         ax3 = plt.subplot2grid(grid, (0, 2))
-        ax4 = plt.subplot2grid(grid, (1, 0),colspan=3)
+        ax4 = plt.subplot2grid(grid, (1, 0), colspan=3)
         # ax3 = plt.subplot2grid(grid, (1, 0))
         # ax4 = plt.subplot2grid(grid, (1, 1))
 
-        for ax in [ax1, ax2, ax3,ax4]:
+        for ax in [ax1, ax2, ax3, ax4]:
             ax.set_axis_off()
         weights_anim = torch.zeros(0)
         for param in self.model.parameters():
             param = torch.flatten(param, start_dim=0)
             weights_anim = torch.cat([weights_anim, param.cpu()])
 
-        x, y = 1000, 2200
+        x, y = 1500, 4700
         target_len = x * y
         if target_len > weights_anim.shape[0]:
             n = target_len - weights_anim.shape[0]
             wfilling = torch.full((n,), 0.)
             weights_anim = torch.cat([weights_anim, wfilling])
-        w_stat = weights_anim.view(x,y).detach().cpu().numpy()
-        for i in range(0, fuel_slices.shape[0] - 1):
+        w_stat = weights_anim.view(x, y).detach().cpu().numpy()
+        for i in range(0, self.n_frames - 1):
             idx_input = i
             idx_output = i + 1
 
@@ -603,17 +637,18 @@ class teacher(nn.Module):
             asout = []
 
             for ii in range(len(x_idx_start)):
-                fsin.append(fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                rsin.append(r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                gsin.append(g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                bsin.append(b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                asin.append(alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsin.append(self.r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsin.append(self.g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsin.append(self.b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asin.append(self.alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
-                fsout.append(fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                rsout.append(r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                gsout.append(g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                bsout.append(b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-                asout.append(alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                fsout.append(self.fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asout.append(
+                    self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
             fuel_subslice_in = torch.stack(fsin, dim=0)
             r_subslice_in = torch.stack(rsin, dim=0)
@@ -621,15 +656,15 @@ class teacher(nn.Module):
             b_subslice_in = torch.stack(bsin, dim=0)
             alpha_subslice_in = torch.stack(asin, dim=0)
             data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=1)
-            meta_step_in = meta_binary_slices[idx_input][0]
+            meta_step_in = self.meta_binary_slices[idx_input][0]
             meta_step_in_numeric = self.meta_tensor[idx_input][0]
-            meta_fuel_initial_speed_in = meta_binary_slices[idx_input][1]
-            meta_fuel_cut_off_time_in = meta_binary_slices[idx_input][2]
-            meta_igni_time_in = meta_binary_slices[idx_input][3]
-            meta_ignition_temp_in = meta_binary_slices[idx_input][4]
+            meta_fuel_initial_speed_in = self.meta_binary_slices[idx_input][1]
+            meta_fuel_cut_off_time_in = self.meta_binary_slices[idx_input][2]
+            meta_igni_time_in = self.meta_binary_slices[idx_input][3]
+            meta_ignition_temp_in = self.meta_binary_slices[idx_input][4]
 
-            meta_viscosity_in = meta_binary_slices[idx_input][14]
-            meta_diff_in = meta_binary_slices[idx_input][15]
+            meta_viscosity_in = self.meta_binary_slices[idx_input][14]
+            meta_diff_in = self.meta_binary_slices[idx_input][15]
             meta_input_subslice = torch.cat([meta_step_in, meta_fuel_initial_speed_in,
                                              meta_fuel_cut_off_time_in, meta_igni_time_in,
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
@@ -642,14 +677,14 @@ class teacher(nn.Module):
 
             data_output_subslice = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out],
                                              dim=1)
-            meta_step_out = meta_binary_slices[idx_output][0]
+            meta_step_out = self.meta_binary_slices[idx_output][0]
             meta_step_out_numeric = self.meta_tensor[idx_output][0]
-            meta_fuel_initial_speed_out = meta_binary_slices[idx_output][1]
-            meta_fuel_cut_off_time_out = meta_binary_slices[idx_output][2]
-            meta_igni_time_out = meta_binary_slices[idx_output][3]
-            meta_ignition_temp_out = meta_binary_slices[idx_output][4]
-            meta_viscosity_out = meta_binary_slices[idx_output][14]
-            meta_diff_out = meta_binary_slices[idx_output][15]
+            meta_fuel_initial_speed_out = self.meta_binary_slices[idx_output][1]
+            meta_fuel_cut_off_time_out = self.meta_binary_slices[idx_output][2]
+            meta_igni_time_out = self.meta_binary_slices[idx_output][3]
+            meta_ignition_temp_out = self.meta_binary_slices[idx_output][4]
+            meta_viscosity_out = self.meta_binary_slices[idx_output][14]
+            meta_diff_out = self.meta_binary_slices[idx_output][15]
             meta_output_subslice = torch.cat([meta_step_out, meta_fuel_initial_speed_out,
                                               meta_fuel_cut_off_time_out, meta_igni_time_out,
                                               meta_ignition_temp_out, meta_viscosity_out, meta_diff_out], dim=0)
@@ -672,7 +707,7 @@ class teacher(nn.Module):
             meta_output_h5 = meta_step_out_numeric.repeat(data_input.shape[0], 1).squeeze(1)
             noise_var_out = torch.zeros((data_input.shape[0], 32))
 
-            self.model.eval()
+
 
             (data_input, structure_input, meta_input_h1, meta_input_h2,
              meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
@@ -697,13 +732,18 @@ class teacher(nn.Module):
             dataset = (data_input, structure_input, meta_input_h1, meta_input_h2,
                        meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
-
+            self.model.eval()
             with torch.no_grad():
                 t_start = time.perf_counter()
-                pred_r, pred_g, pred_b, pred_a, pred_s, _,_,_ = self.model(dataset,spiking_probabilities)
+                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
+                # print(pred_r)
+                # time.sleep(1000)
                 t_pred = time.perf_counter()
             t = t_pred - t_start
-            print(f'Pred Time: {t * 1e3:.1f} [ms]')
+            gpu_stats = gpustat.GPUStatCollection.new_query()
+            mem_usage = [gpu.memory_used for gpu in gpu_stats]
+            print(f'Pred Time: {t * 1e3:.2f} [ms] ',f'GPU MEM: {round(mem_usage[0] * 1e-3, 3)} [GB]',
+                  f'CPU TEMP: {WinTmp.CPU_Temp()} [°C], ', f'GPU TEMP: {WinTmp.GPU_Temp()} [°C], ')
 
             r_v_true = np.array([]).reshape(0, h * self.model.in_scale)
             g_v_true = np.array([]).reshape(0, h * self.model.in_scale)
@@ -759,80 +799,90 @@ class teacher(nn.Module):
 
             rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
-
-            w_static = ax4.imshow(w_stat,cmap='RdBu')
-
-            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim,w_static, title_pred, title_true, title_rms])
-        ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif")
+            #log_w_stat = np.log10(w_stat + 1e-10) # Note : for positive val only
+            #log_w_stat = np.log10(np.abs(w_stat) + 1e-10)*np.sign(w_stat)
+            w_static = ax4.imshow(w_stat, cmap='seismic')
+            ims.append([rgb_pred_anim, rgb_true_anim, rms_anim, w_static, title_pred, title_true, title_rms])
         fig.colorbar(rms_anim, ax=ax3)
         fig.colorbar(w_static, ax=ax4)
+        ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=200)
+
         plt.show()
 
-    def reconstruction_loss(self,criterion, device):
-        folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
-                        'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
-        data_tensor = []
-        meta_tensor = []
-        meta_binary = []
-        field_names = []
+    def reconstruction_loss(self, criterion, device, no_patches):
         spiking_probabilities = torch.zeros((self.model.nca_steps,)).to(self.device)
+        # spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
+        if self.data_tensor is None:
+            folder_names = ['v', 'u', 'velocity_magnitude', 'fuel_density', 'oxidizer_density',
+                            'product_density', 'pressure', 'temperature', 'rgb', 'alpha']
+            data_tensor = []
+            meta_tensor = []
+            meta_binary = []
+            field_names = []
 
-        for name in folder_names:
-            if os.path.exists(name):
-                for i in range(self.first_frame, self.last_frame, self.frame_skip):
-                    if name == 'rgb':
-                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                        for j in range(0, 3):
-                            data_tensor.append(ptfile['data'][:, :, j] / 255.)
+            for name in folder_names:
+                if os.path.exists(name):
+                    for i in range(self.first_frame, self.last_frame, self.frame_skip):
+                        if name == 'rgb':
+                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                            for j in range(0, 3):
+                                data_tensor.append(ptfile['data'][:, :, j] / 255.)
+                                meta_tensor.append(ptfile['metadata'])
+                                field_names.append(ptfile['name'])
+                        else:
+                            ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
+                            data_tensor.append(ptfile['data'])
                             meta_tensor.append(ptfile['metadata'])
                             field_names.append(ptfile['name'])
-                    else:
-                        ptfile = torch.load(name + '\\' + 't{}.pt'.format(i))
-                        data_tensor.append(ptfile['data'])
-                        meta_tensor.append(ptfile['metadata'])
-                        field_names.append(ptfile['name'])
 
-        self.data_tensor = torch.stack(data_tensor, dim=0)
-        self.meta_tensor = torch.stack(meta_tensor, dim=0)
+            self.data_tensor = torch.stack(data_tensor, dim=0)
+            self.meta_tensor = torch.stack(meta_tensor, dim=0)
 
-        for i in range(self.meta_tensor.shape[0]):
-            meta_temp = []
-            for j in range(self.meta_tensor.shape[1]):
-                binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
-                # Note : '!f' The '!' ensures that
-                #     it's in network byte order (big-endian) and the 'f' says that it should be
-                #     packed as a float. Use d for double precision
-                binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
-                # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
-                meta_temp.append(binary_var)
-            meta_binary.append(meta_temp)
-        self.meta_binary = torch.from_numpy(np.array(meta_binary))
-        self.field_names = field_names
-        fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
-        # frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
-        f_dens_pos = len(fdens_idx)
+            for i in range(self.meta_tensor.shape[0]):
+                meta_temp = []
+                for j in range(self.meta_tensor.shape[1]):
+                    binary_var = ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', self.meta_tensor[i, j]))
+                    # Note : '!f' The '!' ensures that
+                    #     it's in network byte order (big-endian) and the 'f' says that it should be
+                    #     packed as a float. Use d for double precision
+                    binary_var = np.frombuffer(binary_var.encode("ascii"), dtype='u1') - 48
+                    # binary_var = torch.tensor([int(bit) for bit in binary_var], dtype=torch.uint8) - 48
+                    meta_temp.append(binary_var)
+                meta_binary.append(meta_temp)
+            self.meta_binary = torch.from_numpy(np.array(meta_binary))
+            self.field_names = field_names
+            fdens_idx = np.array([i for i, x in enumerate(self.field_names) if x == "fuel_density"])
+            # frame_samples = random.sample(list(set(fdens_idx)), k=self.no_frame_samples)
+            f_dens_pos = len(fdens_idx)
 
-        # fdens_idx = fdens_idx[frame_samples]
-        rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
-        r_idx = rgb_idx[::3]  # [frame_samples]
-        g_idx = rgb_idx[::3] + 1  # [frame_samples]
-        b_idx = rgb_idx[::3] + 2  # [frame_samples]
-        alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  # [frame_samples]
-        fuel_slices = self.data_tensor[fdens_idx]
-        min_val = fuel_slices.min()
-        max_val = fuel_slices.max()
-        fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
-
-        r_slices = self.data_tensor[r_idx]
-        g_slices = self.data_tensor[g_idx]
-        b_slices = self.data_tensor[b_idx]
-        alpha_slices = self.data_tensor[alpha_idx]
-        meta_binary_slices = self.meta_binary[fdens_idx]
+            # fdens_idx = fdens_idx[frame_samples]
+            rgb_idx = np.array([i for i, x in enumerate(self.field_names) if x == "rgb"])
+            r_idx = rgb_idx[::3]  # [frame_samples]
+            g_idx = rgb_idx[::3] + 1  # [frame_samples]
+            b_idx = rgb_idx[::3] + 2  # [frame_samples]
+            alpha_idx = np.array([i for i, x in enumerate(self.field_names) if x == "alpha"])  # [frame_samples]
+            fuel_slices = self.data_tensor[fdens_idx]
+            self.w = fuel_slices.shape[1]
+            self.h = fuel_slices.shape[2]
+            self.n_frames = fuel_slices.shape[0]
+            min_val = fuel_slices.min()
+            max_val = fuel_slices.max()
+            self.fuel_slices = (fuel_slices - min_val) / ((max_val - min_val) + 1e-12)
+            self.r_slices = self.data_tensor[r_idx]
+            self.g_slices = self.data_tensor[g_idx]
+            self.b_slices = self.data_tensor[b_idx]
+            self.alpha_slices = self.data_tensor[alpha_idx]
+            self.meta_binary_slices = self.meta_binary[fdens_idx]
+        else:
+            pass
 
         # Note: IDX preparation
-        central_points_x = np.arange(self.input_window_size, fuel_slices.shape[1] - self.input_window_size + 1)
-        central_points_y = np.arange(self.input_window_size, fuel_slices.shape[2] - self.input_window_size + 1)
+        number_of_patches = no_patches
+        central_points_x = np.random.randint(self.input_window_size, self.w - self.input_window_size + 1,
+                                             size=number_of_patches)
+        central_points_y = np.random.randint(self.input_window_size, self.h - self.input_window_size + 1,
+                                             size=number_of_patches)
 
         central_points_x_pos = central_points_x + self.input_window_size
         central_points_x_neg = central_points_x - self.input_window_size
@@ -844,24 +894,20 @@ class teacher(nn.Module):
 
         central_points_x_binary = []
         central_points_y_binary = []
-        v = int(central_points_x_pos.shape[0] / self.model.in_scale + 1)
-        h = int(central_points_y_pos.shape[0] / self.model.in_scale + 1)
-        j = 0
+        v = int(central_points_x_pos.shape[0])
+        h = int(central_points_y_pos.shape[0])
         for m in range(0, v):
-            k = 0
             for n in range(0, h):
-                wx_range = np.array(range(int(central_points_x_neg[j]), int(central_points_x_pos[j]) + 2))
+                wx_range = np.array(range(int(central_points_x_neg[m]), int(central_points_x_pos[m]) + 2))
                 windows_x.append(wx_range)
-                central_point_x_binary_pre = "{0:010b}".format(central_points_x[j])
+                central_point_x_binary_pre = "{0:010b}".format(central_points_x[m])
                 central_points_x_binary.append(
                     torch.tensor([torch.tensor(int(d), dtype=torch.int8) for d in central_point_x_binary_pre]))
-                wy_range = np.array(range(int(central_points_y_neg[k]), int(central_points_y_pos[k]) + 2))
+                wy_range = np.array(range(int(central_points_y_neg[n]), int(central_points_y_pos[n]) + 2))
                 windows_y.append(wy_range)
-                central_point_y_binary_pre = "{0:010b}".format(central_points_y[k])
+                central_point_y_binary_pre = "{0:010b}".format(central_points_y[n])
                 central_points_y_binary.append(
                     torch.tensor([torch.tensor(int(d), dtype=torch.int8) for d in central_point_y_binary_pre]))
-                k += self.model.in_scale
-            j += self.model.in_scale
 
         central_points_x_binary = torch.tensor(np.array(central_points_x_binary))
         central_points_y_binary = torch.tensor(np.array(central_points_y_binary))
@@ -876,9 +922,8 @@ class teacher(nn.Module):
         x_idx_end = np.array([sublist[-1] for sublist in x_idx])
         y_idx_start = np.array([sublist[0] for sublist in y_idx])
         y_idx_end = np.array([sublist[-1] for sublist in y_idx])
-
         #for i in range(0, fuel_slices.shape[0] - 1):
-        idx_input = random.randint(0,fuel_slices.shape[0] - 2)
+        idx_input = random.randint(0, self.n_frames - 2)
         idx_output = idx_input + 1
 
         # Note : Input data
@@ -895,17 +940,27 @@ class teacher(nn.Module):
         asout = []
 
         for ii in range(len(x_idx_start)):
-            fsin.append(fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            rsin.append(r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            gsin.append(g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            bsin.append(b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            asin.append(alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+            d_shape = self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]].shape
+            if d_shape[0] != 15 or d_shape[1] != 15:
+                pass
+            else:
+                fsin.append(self.fuel_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsin.append(self.r_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsin.append(self.g_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsin.append(self.b_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asin.append(self.alpha_slices[idx_input, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
 
-            fsout.append(fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            rsout.append(r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            gsout.append(g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            bsout.append(b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
-            asout.append(alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                fsout.append(self.fuel_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                rsout.append(self.r_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                gsout.append(self.g_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                bsout.append(self.b_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+                asout.append(
+                    self.alpha_slices[idx_output, x_idx_start[ii]:x_idx_end[ii], y_idx_start[ii]:y_idx_end[ii]])
+
+        # if create_val_dataset == 0:
+        #     self.data_input_val
+        #     self.data_output_val
+        # TODO: Exlude validation dataset from training dataset
 
         fuel_subslice_in = torch.stack(fsin, dim=0)
         r_subslice_in = torch.stack(rsin, dim=0)
@@ -913,15 +968,15 @@ class teacher(nn.Module):
         b_subslice_in = torch.stack(bsin, dim=0)
         alpha_subslice_in = torch.stack(asin, dim=0)
         data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=1)
-        meta_step_in = meta_binary_slices[idx_input][0]
+        meta_step_in = self.meta_binary_slices[idx_input][0]
         meta_step_in_numeric = self.meta_tensor[idx_input][0]
-        meta_fuel_initial_speed_in = meta_binary_slices[idx_input][1]
-        meta_fuel_cut_off_time_in = meta_binary_slices[idx_input][2]
-        meta_igni_time_in = meta_binary_slices[idx_input][3]
-        meta_ignition_temp_in = meta_binary_slices[idx_input][4]
+        meta_fuel_initial_speed_in = self.meta_binary_slices[idx_input][1]
+        meta_fuel_cut_off_time_in = self.meta_binary_slices[idx_input][2]
+        meta_igni_time_in = self.meta_binary_slices[idx_input][3]
+        meta_ignition_temp_in = self.meta_binary_slices[idx_input][4]
 
-        meta_viscosity_in = meta_binary_slices[idx_input][14]
-        meta_diff_in = meta_binary_slices[idx_input][15]
+        meta_viscosity_in = self.meta_binary_slices[idx_input][14]
+        meta_diff_in = self.meta_binary_slices[idx_input][15]
         meta_input_subslice = torch.cat([meta_step_in, meta_fuel_initial_speed_in,
                                          meta_fuel_cut_off_time_in, meta_igni_time_in,
                                          meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
@@ -934,14 +989,14 @@ class teacher(nn.Module):
 
         data_output_subslice = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out],
                                          dim=1)
-        meta_step_out = meta_binary_slices[idx_output][0]
+        meta_step_out = self.meta_binary_slices[idx_output][0]
         meta_step_out_numeric = self.meta_tensor[idx_output][0]
-        meta_fuel_initial_speed_out = meta_binary_slices[idx_output][1]
-        meta_fuel_cut_off_time_out = meta_binary_slices[idx_output][2]
-        meta_igni_time_out = meta_binary_slices[idx_output][3]
-        meta_ignition_temp_out = meta_binary_slices[idx_output][4]
-        meta_viscosity_out = meta_binary_slices[idx_output][14]
-        meta_diff_out = meta_binary_slices[idx_output][15]
+        meta_fuel_initial_speed_out = self.meta_binary_slices[idx_output][1]
+        meta_fuel_cut_off_time_out = self.meta_binary_slices[idx_output][2]
+        meta_igni_time_out = self.meta_binary_slices[idx_output][3]
+        meta_ignition_temp_out = self.meta_binary_slices[idx_output][4]
+        meta_viscosity_out = self.meta_binary_slices[idx_output][14]
+        meta_diff_out = self.meta_binary_slices[idx_output][15]
         meta_output_subslice = torch.cat([meta_step_out, meta_fuel_initial_speed_out,
                                           meta_fuel_cut_off_time_out, meta_igni_time_out,
                                           meta_ignition_temp_out, meta_viscosity_out, meta_diff_out], dim=0)
@@ -964,7 +1019,6 @@ class teacher(nn.Module):
         meta_output_h4 = torch.cat([x_idx[:, 0:-1], y_idx[:, 0:-1]], dim=1)
         meta_output_h5 = meta_step_out_numeric.repeat(data_input.shape[0], 1).squeeze(1)
         noise_var_out = torch.zeros((data_input.shape[0], 32))
-
 
         (data_input, structure_input, meta_input_h1, meta_input_h2,
          meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
@@ -989,10 +1043,11 @@ class teacher(nn.Module):
         dataset = (data_input, structure_input, meta_input_h1, meta_input_h2,
                    meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
                    meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
-        pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _ = self.model(dataset, spiking_probabilities)
-        prediction = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s],dim=1)
-        ground_truth = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out, structure_output],dim=1)
-        rms = criterion(prediction ,ground_truth)
+        pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
+        prediction = torch.cat([pred_r, pred_g, pred_b, pred_a, pred_s], dim=1)
+        ground_truth = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out, structure_output],
+                                 dim=1)
+        rms = criterion(prediction, ground_truth)
         return rms
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
@@ -1031,14 +1086,14 @@ class teacher(nn.Module):
             for epoch in range(num_epochs):
                 self.epoch = epoch
                 t_epoch_start = time.perf_counter()
-                #self.seed_setter(int(epoch + 1))
+                self.seed_setter(int(epoch + 1))
                 if reiterate_data == 0:
                     self.data_preparation()
                     print("new sets of data prepared!")
                 else:
                     reiterate_counter += 1
 
-                m_idx = torch.arange(int(self.data_input.shape[0] / 2)) # TODO : Change to random selection
+                m_idx = torch.arange(int(self.data_input.shape[0] / 2))  # TODO : Change to random selection
 
                 dataset = (self.data_input[m_idx], self.structure_input[m_idx], self.meta_input_h1[m_idx],
                            self.meta_input_h2[m_idx],
@@ -1049,29 +1104,41 @@ class teacher(nn.Module):
 
                 spiking_probabilities = torch.rand(self.model.nca_steps).to(self.device)
                 t_start = time.perf_counter()
-                model_output = self.model(dataset,spiking_probabilities)
+                model_output = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
+
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
-
-
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                max_norm = 1.
-                #nn_utils.clip_grad_norm_(self.model.parameters(), max_norm)
+                # clip_value = 10.
+                # nn_utils.clip_grad_norm_(self.model.parameters(), clip_value)
+                # for param in model.parameters():
+                #     param.data.clamp_(-2, 2)
                 optimizer.step()
                 # if (epoch + 1) % 5 == 0:
-                self.model.eval()
+
                 if self.validation_dataset is not None:
                     with torch.no_grad():
-                        val_model_output = self.model(self.validation_dataset,spiking_probabilities)
+                        val_model_output = self.model(self.validation_dataset, spiking_probabilities)
                         val_loss = self.loss_calculation(self.model, val_idx, val_model_output, self.data_input_val,
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
-                self.model.train()
+
                 self.train_loss.append(loss.item())
                 self.val_loss.append(val_loss.item())
+
+                cpu_temp = WinTmp.CPU_Temp()
+                gpu_temp = WinTmp.GPU_Temp()
+                if self.epoch > 3:
+                    if cpu_temp < 20:
+                        cpu_temp = self.cpu_temp[-2]
+                    if gpu_temp < 20:
+                        gpu_temp = self.gpu_temp[-2]
+
+                self.cpu_temp.append(cpu_temp)
+                self.gpu_temp.append(gpu_temp)
 
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
@@ -1090,7 +1157,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 50:
+                    if reiterate_counter > 30:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -1106,7 +1173,7 @@ class teacher(nn.Module):
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = param_group['lr'] * 0.99
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
-                                param_group['lr'] = 1e-3
+                                param_group['lr'] = 5e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
@@ -1114,14 +1181,27 @@ class teacher(nn.Module):
 
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
+                if self.cpu_temp[-1] > 90 or self.gpu_temp[-1] > 75:
+                    print('too hot! lets cool down a little bit')
+                    torch.cuda.synchronize()
+                    time.sleep(2)
+
                 if (epoch + 1) % print_every_nth_frame == 0:
+                    gpu_stats = gpustat.GPUStatCollection.new_query()
+                    mem_usage = [gpu.memory_used for gpu in gpu_stats]
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
+
+
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
-                        f'vL: {val_loss.item():.4f}, '
-                        f'mL: {loss.item():.4f}, '
-                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms]')
+                        f'vL: {val_loss.item():.6f}, '
+                        f'mL: {loss.item():.6f}, '
+                        f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
+                        f'CPU TEMP: {cpu_temp} [°C], '
+                        f'GPU TEMP: {gpu_temp} [°C], '
+                        f'GPU MEM: {round(mem_usage[0]*1e-3,3)} [GB] '
+                    )
                     t = 0.
                     t_epoch = 0.
         else:
@@ -1138,6 +1218,8 @@ class teacher(nn.Module):
     def visualize_lerning(self, poly_degree=3):
         plt.plot(self.train_loss)
         plt.plot(self.val_loss)
+        plt.plot(self.cpu_temp,label='cpu_temp')
+        plt.plot(self.gpu_temp,label='gpu_temp')
         avg_train_loss = sum(self.train_loss) / len(self.train_loss)
         avg_val_loss = sum(self.val_loss) / len(self.val_loss)
         epochs = np.arange(len(self.train_loss))
@@ -1155,9 +1237,8 @@ class teacher(nn.Module):
         plt.show()
 
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
-                         criterion,
-                         norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS,nca_var,loss_weights = model_output
+                         criterion,norm='backward'):
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max, loss_weights = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1165,11 +1246,65 @@ class teacher(nn.Module):
         a_in = data_input[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]
         s_in = structure_input[idx]
 
+        # Note: multitask contrast loss
+        mask = torch.full_like(pred_r,0).to(self.device)
+        b_idx_pool = torch.arange(0, self.batch_size, 1)
+        c_idx_pool = torch.cartesian_prod(b_idx_pool, torch.arange(0, self.model.in_scale, 1)).int()
+        b_idx_pool = b_idx_pool.int()
+        l = self.batch_size // 5
+        k = self.batch_size * 2
+        if self.epoch > self.num_of_epochs*0.1:
+            k = k // 2
+        elif self.epoch > self.num_of_epochs*0.3:
+            k = k // 4
+            l = l // 2
+        elif self.epoch > self.num_of_epochs*0.8:
+            k = k // 8
+            l = l // 4
+        else:pass
+        #print(int(k*self.loss_coeffs[0]),int(k*self.loss_coeffs[1]),int(k*self.loss_coeffs[2]),int(k*self.loss_coeffs[3]),int(k*self.loss_coeffs[4]))
+        r_c_idx = torch.randperm(c_idx_pool.shape[0])[:int(k*self.loss_coeffs[0])]
+        g_c_idx = torch.randperm(c_idx_pool.shape[0])[:int(k*self.loss_coeffs[1])]
+        b_c_idx = torch.randperm(c_idx_pool.shape[0])[:int(k*self.loss_coeffs[2])]
+        a_c_idx = torch.randperm(c_idx_pool.shape[0])[:int(k*self.loss_coeffs[3])]
+        s_c_idx = torch.randperm(c_idx_pool.shape[0])[:int(k*self.loss_coeffs[4])]
+
+        r_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[0])]
+        g_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[1])]
+        b_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[2])]
+        a_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[3])]
+        s_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[4])]
+
+        pred_r[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
+        pred_g[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
+        pred_b[c_idx_pool[b_c_idx]] = mask[c_idx_pool[b_c_idx]]
+        pred_a[c_idx_pool[a_c_idx]] = mask[c_idx_pool[a_c_idx]]
+        pred_s[c_idx_pool[s_c_idx]] = mask[c_idx_pool[s_c_idx]]
+
+        pred_r[b_idx_pool[r_b_idx]] = mask[b_idx_pool[r_b_idx]]
+        pred_g[b_idx_pool[g_b_idx]] = mask[b_idx_pool[g_b_idx]]
+        pred_b[b_idx_pool[b_b_idx]] = mask[b_idx_pool[b_b_idx]]
+        pred_a[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
+        pred_s[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
+
         r_out = data_output[:, 0:self.model.in_scale, :][idx]
         g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]  #.view(self.batch_size, -1)
         b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]  #.view(self.batch_size, -1)
         a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]  #.view(self.batch_size, -1)
         s_out = structure_output[idx]  #.view(self.batch_size, -1)
+
+        r_out[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
+        g_out[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
+        b_out[c_idx_pool[b_c_idx]] = mask[c_idx_pool[b_c_idx]]
+        a_out[c_idx_pool[a_c_idx]] = mask[c_idx_pool[a_c_idx]]
+        s_out[c_idx_pool[s_c_idx]] = mask[c_idx_pool[s_c_idx]]
+
+        r_out[b_idx_pool[r_b_idx]] = mask[b_idx_pool[r_b_idx]]
+        g_out[b_idx_pool[g_b_idx]] = mask[b_idx_pool[g_b_idx]]
+        b_out[b_idx_pool[b_b_idx]] = mask[b_idx_pool[b_b_idx]]
+        a_out[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
+        s_out[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
+
         t = 1 - self.fmot_in[idx]
         t_1 = self.fmot_in[idx]
         t = tt = t.unsqueeze(1)
@@ -1208,29 +1343,34 @@ class teacher(nn.Module):
         diff_s_true = s_out - s_in
         diff_s_pred = pred_s - s_in
         loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
+        r_loss = torch.mean(loss_diff_r, dim=[1, 2])
+        g_loss = torch.mean(loss_diff_g, dim=[1, 2])
+        b_loss = torch.mean(loss_diff_b, dim=[1, 2])
+        a_loss = torch.mean(loss_diff_a, dim=[1, 2])
+        s_loss = torch.mean(loss_diff_s, dim=[1, 2])
         diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s, dim=[1, 2])
         # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
 
-        # Note: Gradient loss
-        grad_r_true = torch.gradient(r_out, dim=[1])[0]
-        grad_r_pred = torch.gradient(pred_r)[0]
-        grad_r = criterion(t * grad_r_pred + t_1 * grad_r_true, grad_r_true)
-        grad_g_true = torch.gradient(g_out, dim=[1])[0]
-        grad_g_pred = torch.gradient(pred_g)[0]
-        grad_g = criterion(t * grad_g_pred + t_1 * grad_g_true, grad_g_true)
-        grad_b_true = torch.gradient(b_out, dim=[1])[0]
-        grad_b_pred = torch.gradient(pred_b)[0]
-        grad_b = criterion(t * grad_b_pred + t_1 * grad_b_true, grad_b_true)
-        grad_a_true = torch.gradient(a_out, dim=[1])[0]
-        grad_a_pred = torch.gradient(pred_a)[0]
-        grad_a = criterion(t * grad_a_pred + t_1 * grad_a_true, grad_a_true)
-        grad_s_true = torch.gradient(s_out, dim=[1])[0]
-        grad_s_pred = torch.gradient(pred_s)[0]
-        grad_s = criterion(t * grad_s_pred + t_1 * grad_s_true, grad_s_true)
-
-        grad_loss = torch.mean(grad_r + grad_g + grad_b + grad_a + grad_s, dim=[1, 2])
-        # grad_loss = grad_r + grad_g + grad_b + grad_a + grad_s
-
+        # # Note: Gradient loss
+        # grad_r_true = torch.gradient(r_out)[0]
+        # grad_r_pred = torch.gradient(pred_r)[0]
+        # grad_r = criterion(t * grad_r_pred + t_1 * grad_r_true, grad_r_true)
+        # grad_g_true = torch.gradient(g_out)[0]
+        # grad_g_pred = torch.gradient(pred_g)[0]
+        # grad_g = criterion(t * grad_g_pred + t_1 * grad_g_true, grad_g_true)
+        # grad_b_true = torch.gradient(b_out)[0]
+        # grad_b_pred = torch.gradient(pred_b)[0]
+        # grad_b = criterion(t * grad_b_pred + t_1 * grad_b_true, grad_b_true)
+        # grad_a_true = torch.gradient(a_out)[0]
+        # grad_a_pred = torch.gradient(pred_a)[0]
+        # grad_a = criterion(t * grad_a_pred + t_1 * grad_a_true, grad_a_true)
+        # grad_s_true = torch.gradient(s_out)[0]
+        # grad_s_pred = torch.gradient(pred_s)[0]
+        # grad_s = criterion(t * grad_s_pred + t_1 * grad_s_true, grad_s_true)
+        #
+        # grad_loss = torch.mean(grad_r + grad_g + grad_b + grad_a + grad_s, dim=[1, 2])
+        # # grad_loss = grad_r + grad_g + grad_b + grad_a + grad_s
+        #
         # Note: Fourier loss
         fft_out_pred_r = torch.real(torch.fft.rfft2(pred_r, norm=norm))
         fft_out_true_r = torch.real(torch.fft.rfft2(r_out, norm=norm))
@@ -1256,6 +1396,11 @@ class teacher(nn.Module):
         fft_loss_s = criterion(t * fft_out_pred_s + t_1 * fft_out_true_r, fft_out_true_s)
         fft_loss = torch.mean(fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s, dim=[1, 2])
         # fft_loss = fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s
+        r_loss += torch.mean(fft_loss_r, dim=[1, 2])
+        g_loss += torch.mean(fft_loss_g, dim=[1, 2])
+        b_loss += torch.mean(fft_loss_b, dim=[1, 2])
+        a_loss += torch.mean(fft_loss_a, dim=[1, 2])
+        s_loss += torch.mean(fft_loss_s, dim=[1, 2])
 
         # Note: Fourier Gradient Loss
         diff_fft_true_r = fft_out_true_r - fft_in_true_r
@@ -1277,6 +1422,12 @@ class teacher(nn.Module):
             diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s, dim=[1, 2])
         # diff_fft_loss = diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s
 
+        r_loss += torch.mean(diff_fft_loss_r, dim=[1, 2])
+        g_loss += torch.mean(diff_fft_loss_g, dim=[1, 2])
+        b_loss += torch.mean(diff_fft_loss_b, dim=[1, 2])
+        a_loss += torch.mean(diff_fft_loss_a, dim=[1, 2])
+        s_loss += torch.mean(diff_fft_loss_s, dim=[1, 2])
+
         # Note : Exact value loss
         loss_r = criterion(t * pred_r + t_1 * r_out, r_out)
         loss_g = criterion(t * pred_g + t_1 * g_out, g_out)
@@ -1284,149 +1435,230 @@ class teacher(nn.Module):
         loss_alpha = criterion(t * pred_a + t_1 * a_out, a_out)
         loss_s = criterion(t * pred_s + t_1 * s_out, s_out)
         value_loss = torch.mean(loss_r + loss_g + loss_b + loss_alpha + loss_s, dim=[1, 2])
-        # value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
+        #value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
 
-        t = t.squeeze(1)
-        t_1 = t_1.squeeze(1)
+        r_loss += torch.mean(loss_r, dim=[1, 2])
+        g_loss += torch.mean(loss_g, dim=[1, 2])
+        b_loss += torch.mean(loss_b, dim=[1, 2])
+        a_loss += torch.mean(loss_alpha, dim=[1, 2])
+        s_loss += torch.mean(loss_s, dim=[1, 2])
+
+        # # Note: Deep Supervision Loss cosine sim
+        # rres, gres, bres, ares, sres = deepS
+        # dpSWeight = 1.0
+        # cosine_loss_rres = 1 - torch.nn.functional.cosine_similarity(rres.flatten(1), r_out.flatten(1), dim=1).mean()
+        # cosine_loss_gres = 1 - torch.nn.functional.cosine_similarity(gres.flatten(1), g_out.flatten(1), dim=1).mean()
+        # cosine_loss_bres = 1 - torch.nn.functional.cosine_similarity(bres.flatten(1), b_out.flatten(1), dim=1).mean()
+        # cosine_loss_ares = 1 - torch.nn.functional.cosine_similarity(ares.flatten(1), a_out.flatten(1), dim=1).mean()
+        # cosine_loss_sres = 1 - torch.nn.functional.cosine_similarity(sres.flatten(1), s_out.flatten(1), dim=1).mean()
+        # deepSLoss = dpSWeight * (cosine_loss_rres + cosine_loss_gres + cosine_loss_bres + cosine_loss_ares + cosine_loss_sres) / 5
+        #
+        t = t.squeeze()
+        t_1 = t_1.squeeze()
         # Solution for learning and maintaining of the proper color and other element space
-        bandwidth = torch.tensor(0.5).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
-        bins = 255  # Note: 255 values
-        r_out = torch.flatten(r_out, start_dim=1)
-        pred_r = torch.flatten(pred_r, start_dim=1)
-        bins_true = torch.linspace(r_out.min(), r_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_r.min().tolist(), pred_r.max().tolist(), bins).to(self.device)
-        r_true_hist = kornia.enhance.histogram(r_out, bins=bins_true, bandwidth=bandwidth)
-        r_pred_hist = kornia.enhance.histogram(pred_r, bins=bins_pred, bandwidth=bandwidth)
-        r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
+        # bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
+        # bins = 256  # Note: 256 values
+        # r_out = torch.flatten(r_out, start_dim=1)
+        # pred_r = torch.flatten(pred_r, start_dim=1)
+        # r_true_hist,r_true_hist_pdf = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        # r_pred_hist,r_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
+        # r_hist_loss_pdf = criterion(t * r_pred_hist_pdf + t_1 * r_true_hist_pdf, r_true_hist_pdf)
+        # r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
+        #
+        # g_out = torch.flatten(g_out, start_dim=1)
+        # pred_g = torch.flatten(pred_g, start_dim=1)
+        # g_true_hist,g_true_hist_pdf = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # g_pred_hist,g_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # g_true_hist_max = g_true_hist.max()
+        # # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
+        # # g_pred_hist_max = g_pred_hist.max()
+        # # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
+        # g_hist_loss_pdf = criterion(t * g_pred_hist_pdf + t_1 * g_true_hist_pdf, g_true_hist_pdf)
+        # g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
+        #
+        #
+        # b_out = torch.flatten(b_out, start_dim=1)
+        # pred_b = torch.flatten(pred_b, start_dim=1)
+        # b_true_hist,b_true_hist_pdf = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # b_pred_hist,b_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # b_true_hist_max = b_true_hist.max()
+        # # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
+        # # b_pred_hist_max = b_pred_hist.max()
+        # # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
+        # b_hist_loss_pdf = criterion(t * b_pred_hist_pdf + t_1 * b_true_hist_pdf, b_true_hist_pdf)
+        # b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
+        #
+        #
+        # a_out = torch.flatten(a_out, start_dim=1)
+        # pred_a = torch.flatten(pred_a, start_dim=1)
+        # a_true_hist,a_true_hist_pdf = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # a_pred_hist,a_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # a_true_hist_max = a_true_hist.max()
+        # # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
+        # # a_pred_hist_max = a_pred_hist.max()
+        # # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
+        # a_hist_loss_pdf = criterion(t * a_pred_hist_pdf + t_1 * a_true_hist_pdf, a_true_hist_pdf)
+        # a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
+        #
+        #
+        # s_out = torch.flatten(s_out, start_dim=1)
+        # pred_s = torch.flatten(pred_s, start_dim=1)
+        # s_true_hist,s_true_hist_pdf = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # s_pred_hist,s_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
+        # # s_true_hist_max = s_true_hist.max()
+        # # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
+        # # s_pred_hist_max = s_pred_hist.max()
+        # # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
+        # s_hist_loss_pdf = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
+        # s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
+        #
+        # hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss)
+        # hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf)
 
-        g_out = torch.flatten(g_out, start_dim=1)
-        pred_g = torch.flatten(pred_g, start_dim=1)
-        bins_true = torch.linspace(g_out.min(), g_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_g.min().tolist(), pred_g.max().tolist(), bins).to(self.device)
-        g_true_hist = kornia.enhance.histogram(g_out, bins=bins_true, bandwidth=bandwidth)
-        g_pred_hist = kornia.enhance.histogram(pred_g, bins=bins_pred, bandwidth=bandwidth)
-        g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
-
-        b_out = torch.flatten(b_out, start_dim=1)
-        pred_b = torch.flatten(pred_b, start_dim=1)
-        bins_true = torch.linspace(b_out.min(), b_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_b.min().tolist(), pred_b.max().tolist(), bins).to(self.device)
-        b_true_hist = kornia.enhance.histogram(b_out, bins=bins_true, bandwidth=bandwidth)
-        b_pred_hist = kornia.enhance.histogram(pred_b, bins=bins_pred, bandwidth=bandwidth)
-        b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
-
-        a_out = torch.flatten(a_out, start_dim=1)
-        pred_a = torch.flatten(pred_a, start_dim=1)
-        bins_true = torch.linspace(a_out.min(), a_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_a.min().tolist(), pred_a.max().tolist(), bins).to(self.device)
-        a_true_hist = kornia.enhance.histogram(a_out, bins=bins_true, bandwidth=bandwidth)
-        a_pred_hist = kornia.enhance.histogram(pred_a, bins=bins_pred, bandwidth=bandwidth)
-        a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
-
-        s_out = torch.flatten(s_out, start_dim=1)
-        pred_s = torch.flatten(pred_s, start_dim=1)
-        bins_true = torch.linspace(s_out.min(), s_out.max(), bins).to(self.device)
-        bins_pred = torch.linspace(pred_s.min().tolist(), pred_s.max().tolist(), bins).to(self.device)
-        s_true_hist = kornia.enhance.histogram(s_out, bins=bins_true, bandwidth=bandwidth)
-        s_pred_hist = kornia.enhance.histogram(pred_s, bins=bins_pred, bandwidth=bandwidth)
-        s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
-        hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss, dim=1)
-        # hist_loss = r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss
-
-        # Note: Deep Supervision Loss
-        rres, gres, bres, ares, sres = deepS
-        dpSWeight = 1
-        rres_target = (torch.rand_like(rres)+rres)*0.5
-        gres_target = (torch.rand_like(gres)+gres)*0.5
-        bres_target = (torch.rand_like(bres)+bres)*0.5
-        ares_target = (torch.rand_like(ares)+ares)*0.5
-        sres_target = (torch.rand_like(sres)+sres)*0.5
-        loss_rres, loss_gres, loss_bres, loss_ares, loss_sres = (
-            f.mse_loss(rres, rres_target),
-            f.mse_loss(gres, gres_target),
-            f.mse_loss(bres, bres_target),
-            f.mse_loss(ares, ares_target),
-            f.mse_loss(sres, sres_target))
-        deepSLoss = torch.mean(loss_rres)* dpSWeight + torch.mean(loss_gres)* dpSWeight + torch.mean(loss_bres)* dpSWeight + torch.mean(loss_ares)* dpSWeight + torch.mean(loss_sres)* dpSWeight
-        # deepSLoss = loss_x + loss_x_mod + loss_rgbas_prod + loss_rres + loss_gres + loss_bres + loss_ares + loss_sres
-
-
-        # Note: SSIM Loss
-        l = self.batch_size
-        indices = torch.randperm(r_out.size(0))
-        selected_indices = indices[:l]
-        r_out_img = r_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        g_out_img = g_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        b_out_img = b_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        a_out_img = a_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        s_out_img = s_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        r_pred_img = pred_r[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        g_pred_img = pred_g[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        b_pred_img = pred_b[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        a_pred_img = pred_a[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        s_pred_img = pred_s[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        rgbas_out = torch.stack([r_out_img, g_out_img, b_out_img, a_out_img, s_out_img], dim=-1)
-        rgbas_pred = torch.stack([r_pred_img, g_pred_img, b_pred_img, a_pred_img, s_pred_img], dim=-1)
-        rgbas_out = torch.permute(rgbas_out, (0, 3, 1, 2))
-        rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
-        ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
-
+        #
+        # # Note: SSIM Loss
+        # l = self.batch_size
+        # indices = torch.randperm(r_out.size(0))
+        # selected_indices = indices[:l]
+        # r_out_img = r_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # g_out_img = g_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # b_out_img = b_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # a_out_img = a_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # s_out_img = s_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # r_pred_img = pred_r[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # g_pred_img = pred_g[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # b_pred_img = pred_b[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # a_pred_img = pred_a[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # s_pred_img = pred_s[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
+        # rgbas_out = torch.stack([r_out_img, g_out_img, b_out_img, a_out_img, s_out_img], dim=-1)
+        # rgbas_pred = torch.stack([r_pred_img, g_pred_img, b_pred_img, a_pred_img, s_pred_img], dim=-1)
+        # rgbas_out = torch.permute(rgbas_out, (0, 3, 1, 2))
+        # rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
+        # ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
+        #
         # NCA Criticality loss
-        target_variance = 15*15*5
-        critical_loss = (nca_var - target_variance) ** 2
+        target_variance = torch.full_like(nca_var,0.49,requires_grad=True)
+        critical_loss = torch.mean(torch.abs(target_variance - nca_var))
 
-        # Reconstruction loss
-        reconstruction_loss = self.reconstruction_loss(criterion,self.device)
-        rec_loss = reconstruction_loss.mean()
+        # Sinkhorn Loss
+        sink_loss_r = torch.mean(
+            self.sinkhorn_loss(t.unsqueeze(1) * pred_r.flatten(start_dim=1)+t_1.unsqueeze(1)*r_out.flatten(start_dim=1), r_out.flatten(start_dim=1)))
+        sink_loss_g = torch.mean(
+            self.sinkhorn_loss(t.unsqueeze(1) * pred_g.flatten(start_dim=1)+t_1.unsqueeze(1)*g_out.flatten(start_dim=1), g_out.flatten(start_dim=1)))
+        sink_loss_b = torch.mean(
+            self.sinkhorn_loss(t.unsqueeze(1) * pred_b.flatten(start_dim=1)+t_1.unsqueeze(1)*b_out.flatten(start_dim=1), b_out.flatten(start_dim=1)))
+        sink_loss_a = torch.mean(
+            self.sinkhorn_loss(t.unsqueeze(1) * pred_a.flatten(start_dim=1)+t_1.unsqueeze(1)*a_out.flatten(start_dim=1), a_out.flatten(start_dim=1)))
+        sink_loss_s = torch.mean(
+            self.sinkhorn_loss(t.unsqueeze(1) * pred_s.flatten(start_dim=1)+t_1.unsqueeze(1)*s_out.flatten(start_dim=1), s_out.flatten(start_dim=1)))
+        sink_loss = sink_loss_r + sink_loss_g + sink_loss_b + sink_loss_a + sink_loss_s
 
-        A, B, C, D, E, F, G, H, I, J, K,L = loss_weights
-
-        loss_weights = (A, B, C, D, E, F, G, H, I,J, L)
-        criterion.batch_size = value_loss.shape[0]
-        gradient_penalty_loss = criterion.gradient_penalty(model)
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, critical_loss.mean(),rec_loss)  # Attention: Aggregate all losses here
-
-        weighted_losses = [loss * weight for loss, weight in zip(LOSS, loss_weights)]
-        num_losses = len(weighted_losses)
-        mse_matrix = torch.zeros((value_loss.shape[0], num_losses, num_losses)).to(self.device)
-        for i in range(num_losses):
-            for j in range(num_losses):
-                mse = (weighted_losses[i] - weighted_losses[j]) ** 2
-                mse_matrix[:, i, j] = mse
-
-        std_between_losses = mse_matrix.std(dim=(1, 2))
-        mean_between_losses = mse_matrix.mean(dim=(1, 2))
-        dispersion_loss = std_between_losses / mean_between_losses
-        # print(gradient_penalty_loss[0])
-        LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss, hist_loss, deepSLoss,
-                ssim_val, gradient_penalty_loss, critical_loss,rec_loss,dispersion_loss)
-        loss_weights = (A, B, C, D, E, F, G, H, I, J, K, L)
-
-        # print(A * value_loss.mean().item(), "<-value_loss: A", B * diff_loss.mean().item(),
-        #       "<-diff_loss: B", C * grad_loss.mean().item(), "<-grad_loss: C", D * fft_loss.mean().item(),
-        #       "<-fft_loss: D",
-        #       E * diff_fft_loss.mean().item(), "<-diff_fft_loss: E", F * hist_loss.mean().item(), "<-hist_loss: F",
-        #       G * deepSLoss.mean().item(), "<-deepSLoss: G",
-        #       H * ssim_val.mean().item(),
-        #       "<-ssim_val: H", gradient_penalty_loss.mean().item() * I, "<-gradient_penalty_loss: I",critical_loss.mean().item() * J, "<- critical loss: J",
-        #       rec_loss.item()*K, "<- reconstruction loss: K",dispersion_loss.mean().item() * L, "<- dispersion loss: L")
-
-        final_loss, i = 0., 0
-        for losses in LOSS:
-            if pred_r.shape[0] != self.batch_size:
-                n = int(pred_r.shape[0] / self.batch_size)
-                losses = torch.chunk(losses, n, dim=0)
-                final_loss += torch.stack([loss_weights[i] * split.mean(dim=0) for split in losses])
-            else:
-                final_loss += loss_weights[i] * torch.mean(losses)
-            i += 1
-            return final_loss
+        r_loss += sink_loss_r
+        g_loss += sink_loss_g
+        b_loss += sink_loss_b
+        a_loss += sink_loss_a
+        s_loss += sink_loss_s
 
 
+        # KL Div LOSS
+        pred_distribution_r = f.softmax(pred_r.flatten(start_dim=1), dim=-1)
+        target_distribution_r = f.softmax(r_out.flatten(start_dim=1), dim=-1)
 
+        pred_distribution_g = f.softmax(pred_g.flatten(start_dim=1), dim=-1)
+        target_distribution_g = f.softmax(g_out.flatten(start_dim=1), dim=-1)
 
+        pred_distribution_b = f.softmax(pred_b.flatten(start_dim=1), dim=-1)
+        target_distribution_b = f.softmax(b_out.flatten(start_dim=1), dim=-1)
 
+        pred_distribution_a = f.softmax(pred_a.flatten(start_dim=1), dim=-1)
+        target_distribution_a = f.softmax(a_out.flatten(start_dim=1), dim=-1)
+
+        pred_distribution_s = f.softmax(pred_s.flatten(start_dim=1), dim=-1)
+        target_distribution_s = f.softmax(s_out.flatten(start_dim=1), dim=-1)
+
+        kl_loss_r = f.kl_div(pred_distribution_r.log(), target_distribution_r, reduction="batchmean", log_target=True)
+        kl_loss_g = f.kl_div(pred_distribution_g.log(), target_distribution_g, reduction="batchmean", log_target=True)
+        kl_loss_b = f.kl_div(pred_distribution_b.log(), target_distribution_b, reduction="batchmean", log_target=True)
+        kl_loss_a = f.kl_div(pred_distribution_a.log(), target_distribution_a, reduction="batchmean", log_target=True)
+        kl_loss_s = f.kl_div(pred_distribution_s.log(), target_distribution_s, reduction="batchmean", log_target=True)
+
+        # Combine the separate KL divergence losses if desired
+        kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
+
+        r_loss += kl_loss_r
+        g_loss += kl_loss_g
+        b_loss += kl_loss_b
+        a_loss += kl_loss_a
+        s_loss += kl_loss_s
+
+        grad_penalty = torch.mean(criterion.gradient_penalty(model))
+
+        entropy_loss = 0
+        for pred_channel, true_channel,losses in zip([pred_r, pred_g, pred_b, pred_a, pred_s],[r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
+            p_pred = f.softmax(pred_channel.flatten(), dim=0)
+            p_true = f.softmax(true_channel.flatten(), dim=0)
+            entropy_pred = -torch.sum(p_pred * torch.log(p_pred + 1e-9))
+            entropy_true = -torch.sum(p_true * torch.log(p_true + 1e-9))
+            entropy_loss += torch.abs(entropy_pred - entropy_true)
+            losses += entropy_loss
+
+        self.loss_coeffs[0] = r_loss.mean().item()
+        self.loss_coeffs[1] = g_loss.mean().item()
+        self.loss_coeffs[2] = b_loss.mean().item()
+        self.loss_coeffs[3] = a_loss.mean().item()
+        self.loss_coeffs[4] = s_loss.mean().item()
+        loss_min = self.loss_coeffs.min()
+        loss_range = self.loss_coeffs.max() - loss_min + 1e-12
+        normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
+        temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
+        self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
+
+        # A, B, C, D, E, F, G, H, I, J, K, L = torch.sigmoid(loss_weights)
+        #
+        # criterion.batch_size = value_loss.shape[0]
+        # gradient_penalty_loss = criterion.gradient_penalty(model)
+        #
+        # loss_tensor = torch.stack([A, B, C, D, E, F, G, H, I, J, K, L]).to(self.device)
+        # mean_loss = torch.abs(torch.mean(loss_tensor))
+        # variance_loss = torch.abs(torch.var(loss_tensor, unbiased=False))
+        # dispersion_loss = variance_loss / (mean_loss+1e-6)
+        # # print(gradient_penalty_loss[0])
+        # # Note: Normalisation of weights between each other
+        # LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
+        #         ssim_val, critical_loss, rec_loss)
+        # loss_weights = (A, B, C, D, E, F, G, H, J, K )
+        # total_weight = sum(loss_weights)+ 1e-4 * len(loss_weights)
+        # dynamic_weights = [w / total_weight for w in loss_weights]
+        # losses = (dynamic_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
+        # (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
+        #  ssim_val, critical_loss, rec_loss) = losses
+        # LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss,deepSLoss,
+        #         ssim_val, gradient_penalty_loss, critical_loss, rec_loss, dispersion_loss)
+        #
+        # #aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1e3, 1e3, 1e4, 1e5,1e2, 1e5, 1e-1, 1e3, 1, 1e2, 1e4, 1.
+        # aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1, 1, 1, 1,1, 1e5, 1, 1, 1, 1, 1, 1.
+        #
+        # loss_weights = (aa, bb, cc, dd, ee,ff,gg, hh, ii, jj, kk, ll)
+        # final_loss = sum(loss_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
+        #
+        # if self.epoch % 50 == 0:
+        #     print(A*aa * value_loss.mean().item(), "<- value_loss: A",
+        #           B *bb * diff_loss.mean().item(),"<- diff_loss: B",
+        #           C *cc * grad_loss.mean().item(), "<- grad_loss: C",
+        #           D *dd * fft_loss.mean().item(),"<- fft_loss: D",
+        #           E *ee * diff_fft_loss.mean().item(), "<- diff_fft_loss: E",
+        #           F *ff * hist_loss.mean().item(), "<- hist_loss: F",
+        #           G *gg * deepSLoss.mean().item(), "<- deepSLoss: G",
+        #           H *hh * ssim_val.mean().item(),"<- ssim_val: H",
+        #           I*ii*gradient_penalty_loss.mean().item() ,"<- gradient_penalty_loss: I",
+        #           J*jj*critical_loss.mean().item(), "<- critical loss: J",
+        #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
+        #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
+        # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
+        #print( '0',entropy_loss*1e1,'1',grad_penalty*2e-2,'3',kl_loss*5e-4,'4',sink_loss*8e-1,'5',torch.mean(diff_fft_loss)*1e3,'6',critical_loss*1e-1,'7',torch.mean(diff_loss)*1e1,'8',torch.mean(fft_loss)*2e3,'9',2e1*torch.mean(value_loss),'10',ortho_mean*5e-4)
+        # final_loss =  entropy_loss+grad_penalty+kl_loss*1e-2+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
+        final_loss =  entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*1e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*5e-4
+        return final_loss*1e-1
 
     @staticmethod
     def seed_setter(seed):
