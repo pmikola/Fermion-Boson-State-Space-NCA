@@ -20,7 +20,6 @@ class WaveletModel(nn.Module):
         cwt_transformed = self.cwt(x,self.scales,i)
         return cwt_transformed
 
-
     def wavelet(self,t, f,i):
         # Note : Real Valued Morlet Wavelet
         sigma = self.f_mod[i] / (2 * torch.pi * f)

@@ -20,13 +20,14 @@ import torch.nn.utils as nn_utils
 import torch.nn.functional as f
 
 class teacher(nn.Module):
-    def __init__(self, model, device):
+    def __init__(self, model,discriminator, device):
         # TODO: NOT MACIEK
         super(teacher, self).__init__()
         #self.t = None
         self.validation_dataset = None
         self.max_seed = int(1e2)
         self.model = model
+        self.discriminator = discriminator
         self.device = device
         self.fsim = None
         self.period = 1
@@ -80,6 +81,7 @@ class teacher(nn.Module):
         self.epoch = 0
         self.num_of_epochs = 0
         self.train_loss = []
+        self.disc_loss = []
         self.val_loss = []
         self.cpu_temp = []
         self.gpu_temp = []
@@ -270,10 +272,10 @@ class teacher(nn.Module):
             slice_y_in = slice(window_y_in[0], window_y_in[-1] + 1)
 
             idx_output =idx_input+1 #random.choice(range(0, self.n_frames))
-            offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
-            central_point_x_out = central_point_x_in  #+ offset_x # TODO: after proper learning without offset and good prediction, make offset comeback
-            central_point_y_out = central_point_y_in  #+ offset_y
+            spatial_offset_x = random.randint(int(-self.input_window_size), int(self.input_window_size))
+            spatial_offset_y = random.randint(int(-self.input_window_size), int(self.input_window_size))
+            central_point_x_out = central_point_x_in  #+ spatial_offset_x
+            central_point_y_out = central_point_y_in  #+ spatial_offset_y
 
             window_x_out = np.array(
                 range(central_point_x_out - self.input_window_size, central_point_x_out + self.input_window_size + 1))
@@ -789,15 +791,15 @@ class teacher(nn.Module):
 
             prediction = np.stack((r_v_pred, g_v_pred, b_v_pred), axis=2)
             ground_truth = np.stack((r_v_true, g_v_true, b_v_true), axis=2)
-
             title_pred = ax1.set_title("Prediction")
             title_true = ax2.set_title("Ground Truth")
             title_rms = ax3.set_title("rms")
 
-            rgb_pred_anim = ax1.imshow(prediction.astype(np.uint8) * 255, alpha=a_v_pred)
-            rgb_true_anim = ax2.imshow(ground_truth.astype(np.uint8) * 255, alpha=a_v_true)
+            rgb_pred_anim = ax1.imshow((prediction*255).astype(np.uint8), alpha=a_v_pred)
+            rgb_true_anim = ax2.imshow((ground_truth*255).astype(np.uint8) , alpha=a_v_true)
 
-            rms = np.mean(np.sqrt(abs(prediction ** 2 - ground_truth ** 2)), axis=2)
+            rms = np.sqrt(np.mean((prediction  - ground_truth)** 2 , axis=2))
+            rms = rms / rms.max()
             rms_anim = ax3.imshow(rms, cmap='RdBu', vmin=0, vmax=1)
             #log_w_stat = np.log10(w_stat + 1e-10) # Note : for positive val only
             #log_w_stat = np.log10(np.abs(w_stat) + 1e-10)*np.sign(w_stat)
@@ -807,7 +809,6 @@ class teacher(nn.Module):
         fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
         ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=200)
-
         plt.show()
 
     def reconstruction_loss(self, criterion, device, no_patches):
@@ -1051,7 +1052,7 @@ class teacher(nn.Module):
         return rms
 
     def learning_phase(self, teacher, no_frame_samples, batch_size, input_window_size, first_frame, last_frame,
-                       frame_skip, criterion, optimizer, device, learning=1,
+                       frame_skip, criterion, optimizer,criterion_disc,disc_optimizer, device, learning=1,
                        num_epochs=1500):
         (self.no_frame_samples, self.batch_size, self.input_window_size, self.first_frame,
          self.last_frame, self.frame_skip) = (no_frame_samples, batch_size,
@@ -1106,18 +1107,20 @@ class teacher(nn.Module):
                 t_start = time.perf_counter()
                 model_output = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
-
                 loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
                                              self.structure_input, self.structure_output, criterion_model, norm)
-
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                # clip_value = 10.
-                # nn_utils.clip_grad_norm_(self.model.parameters(), clip_value)
-                # for param in model.parameters():
-                #     param.data.clamp_(-2, 2)
                 optimizer.step()
-                # if (epoch + 1) % 5 == 0:
+
+                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output, self.structure_output,
+                                        criterion_disc)
+                disc_optimizer.zero_grad(set_to_none=True)
+                disc_loss.backward()
+                disc_optimizer.step()
+
+
+
 
                 if self.validation_dataset is not None:
                     with torch.no_grad():
@@ -1127,6 +1130,7 @@ class teacher(nn.Module):
                                                          self.structure_output_val, criterion_model, norm)
 
                 self.train_loss.append(loss.item())
+                self.disc_loss.append(disc_loss.item())
                 self.val_loss.append(val_loss.item())
 
                 cpu_temp = WinTmp.CPU_Temp()
@@ -1192,11 +1196,11 @@ class teacher(nn.Module):
                     t_epoch_total = num_epochs * t_epoch
                     t_epoch_current = epoch * t_epoch
 
-
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
                         f'vL: {val_loss.item():.6f}, '
                         f'mL: {loss.item():.6f}, '
+                        f'dL: {disc_loss.item():.6f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
                         f'CPU TEMP: {cpu_temp} [°C], '
                         f'GPU TEMP: {gpu_temp} [°C], '
@@ -1216,10 +1220,13 @@ class teacher(nn.Module):
         pass
 
     def visualize_lerning(self, poly_degree=3):
-        plt.plot(self.train_loss)
-        plt.plot(self.val_loss)
+        plt.plot(self.train_loss, color='blue',label='train')
+        plt.plot(self.val_loss, color='orange',label='test')
+        plt.plot(self.disc_loss, color='red', label='disc')
+
         plt.plot(self.cpu_temp,label='cpu_temp')
         plt.plot(self.gpu_temp,label='gpu_temp')
+
         avg_train_loss = sum(self.train_loss) / len(self.train_loss)
         avg_val_loss = sum(self.val_loss) / len(self.val_loss)
         epochs = np.arange(len(self.train_loss))
@@ -1659,6 +1666,42 @@ class teacher(nn.Module):
         # final_loss =  entropy_loss+grad_penalty+kl_loss*1e-2+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
         final_loss =  entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*1e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*5e-4
         return final_loss*1e-1
+
+    def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
+
+        dataset = (
+            self.data_input[idx], self.structure_input[idx], self.meta_input_h1[idx], self.meta_input_h2[idx],
+            self.meta_input_h3[idx], self.meta_input_h4[idx], self.meta_input_h5[idx], self.noise_diff_in[idx],
+            self.fmot_in_binary[idx],
+            self.meta_output_h1[idx],
+            self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
+            self.noise_diff_out[idx])
+
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max, loss_weights = model_output
+        r_out = data_output[:, 0:self.model.in_scale, :][idx]
+        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
+        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]
+        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]
+        s_out = structure_output[idx]
+
+        pred = torch.cat([pred_r.detach().unsqueeze(1), pred_g.detach().unsqueeze(1), pred_b.detach().unsqueeze(1), pred_a.detach().unsqueeze(1), pred_s.detach().unsqueeze(1)], dim=1)
+        true = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1), s_out.unsqueeze(1)], dim=1)
+        # Note : Fill value for label smoothing
+        fake_labels = torch.full((pred.shape[0], 1), 0.05).to(self.device)
+        true_labels = torch.full((true.shape[0], 1), 0.95).to(self.device)
+        combined_data = torch.cat([pred, true], dim=0)
+        # _,_, h, w = combined_data.shape
+        # mask = torch.ones_like(combined_data, device=self.device)
+        # center_x, center_y = w // 2, h // 2
+        # mask_radius = torch.randint(0,5,(1,))
+        # mask[:, :, center_y-mask_radius:center_y+mask_radius+1, center_x-mask_radius:center_x+mask_radius+1] = 0.0
+        # combined_data = combined_data * mask
+        combined_labels = torch.cat([fake_labels, true_labels], dim=0)
+        shuffle_idx = torch.randint(0, combined_data.shape[0], (int(combined_data.shape[0] / 2),)).to(self.device)
+        shuffled_labels = combined_labels[shuffle_idx]
+        disc_pred = self.discriminator(combined_data, dataset, shuffle_idx)
+        disc_loss = criterion(disc_pred, shuffled_labels)
+        return disc_loss
 
     @staticmethod
     def seed_setter(seed):

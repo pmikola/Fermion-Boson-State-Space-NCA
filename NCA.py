@@ -40,9 +40,9 @@ class NCA(nn.Module):
         self.fermion_features = Linformer(
             dim=self.channels*self.fermion_number*self.wavelet_scales,
             seq_len= self.patch_size_x * self.patch_size_y,
-            depth=2,
-            heads=self.fermion_number,
-            dim_head =self.fermion_number,
+            depth=3,
+            heads=self.channels*self.fermion_number,
+            dim_head =self.channels*self.fermion_number,
             one_kv_head = False,
             share_kv = False,
             reversible = True,
@@ -53,9 +53,9 @@ class NCA(nn.Module):
         self.boson_features = Linformer(
             dim=self.channels*self.boson_number*self.wavelet_scales,
             seq_len= self.patch_size_x * self.patch_size_y,
-            depth=2,
-            heads=self.boson_number,
-            dim_head=self.boson_number,
+            depth=3,
+            heads=self.channels*self.boson_number,
+            dim_head=self.channels*self.boson_number,
             one_kv_head=False,
             share_kv=False,
             reversible=True,
@@ -105,6 +105,9 @@ class NCA(nn.Module):
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 boson_kernels = self.act(self.boson_features(wavelet_space))
+                #ortho_mean_b, ortho_max_b = self.validate_channel_orthogonality(boson_kernels)
+                #ortho_mean, ortho_max = ortho_mean_f+ortho_mean_b,ortho_max_f+ortho_max_b
+
 
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
                 boson_kernels = self.act(self.project_bosons_seq(boson_kernels)).permute(0, 2, 1)
