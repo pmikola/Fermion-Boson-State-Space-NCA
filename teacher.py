@@ -737,7 +737,7 @@ class teacher(nn.Module):
             self.model.eval()
             with torch.no_grad():
                 t_start = time.perf_counter()
-                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_ = self.model(dataset, spiking_probabilities)
+                pred_r, pred_g, pred_b, pred_a, pred_s, _, _, _,_,_,_ = self.model(dataset, spiking_probabilities)
                 # print(pred_r)
                 # time.sleep(1000)
                 t_pred = time.perf_counter()
@@ -1177,7 +1177,7 @@ class teacher(nn.Module):
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = param_group['lr'] * 0.99
                             if param_group['lr'] < 5e-6 or reiterate_data == 0:
-                                param_group['lr'] = 5e-3
+                                param_group['lr'] = 2e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
@@ -1245,7 +1245,7 @@ class teacher(nn.Module):
 
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
                          criterion,norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max, loss_weights = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max,log_det_jacobian_loss, loss_weights = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1350,6 +1350,7 @@ class teacher(nn.Module):
         diff_s_true = s_out - s_in
         diff_s_pred = pred_s - s_in
         loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
+
         r_loss = torch.mean(loss_diff_r, dim=[1, 2])
         g_loss = torch.mean(loss_diff_g, dim=[1, 2])
         b_loss = torch.mean(loss_diff_b, dim=[1, 2])
@@ -1450,6 +1451,34 @@ class teacher(nn.Module):
         a_loss += torch.mean(loss_alpha, dim=[1, 2])
         s_loss += torch.mean(loss_s, dim=[1, 2])
 
+        # Note: Edge Loss
+
+        boundary_loss_r = self.boundary_loss(t * pred_r+ t_1 * r_out,r_out)
+        boundary_loss_g = self.boundary_loss(t * pred_g + t_1 * g_out, g_out)
+        boundary_loss_b = self.boundary_loss(t * pred_b + t_1 * b_out, b_out)
+        boundary_loss_a = self.boundary_loss(t * pred_a + t_1 * a_out, a_out)
+        boundary_loss_s = self.boundary_loss(t * pred_s + t_1 * s_out, s_out)
+        b_loss  = torch.mean(boundary_loss_r+boundary_loss_g+boundary_loss_b+boundary_loss_a+boundary_loss_s)
+
+        v_loss_r = self.total_variation_loss(pred_r)
+        v_loss_g = self.total_variation_loss(pred_g)
+        v_loss_b = self.total_variation_loss(pred_b)
+        v_loss_a = self.total_variation_loss(pred_a)
+        v_loss_s = self.total_variation_loss(pred_s)
+        var_e_loss = torch.mean(v_loss_r + v_loss_g + v_loss_b + v_loss_a + v_loss_s)
+
+        hf_loss_r = self.fft_high_frequency_loss(t * pred_r+ t_1 * r_out,r_out)
+        hf_loss_g = self.fft_high_frequency_loss(t * pred_g + t_1 * g_out, g_out)
+        hf_loss_b = self.fft_high_frequency_loss(t * pred_b + t_1 * b_out, b_out)
+        hf_loss_a = self.fft_high_frequency_loss(t * pred_a + t_1 * a_out, a_out)
+        hf_loss_s = self.fft_high_frequency_loss(t * pred_s + t_1 * s_out, s_out)
+        hf_e_loss = torch.mean(hf_loss_r+hf_loss_g+hf_loss_b+hf_loss_a+hf_loss_s)
+
+        r_loss += boundary_loss_r + v_loss_r + hf_loss_r
+        g_loss += boundary_loss_g + v_loss_g + hf_loss_g
+        b_loss += boundary_loss_b + v_loss_b + hf_loss_b
+        a_loss += boundary_loss_a + v_loss_a + hf_loss_a
+        s_loss += boundary_loss_s + v_loss_s + hf_loss_s
         # # Note: Deep Supervision Loss cosine sim
         # rres, gres, bres, ares, sres = deepS
         # dpSWeight = 1.0
@@ -1566,7 +1595,6 @@ class teacher(nn.Module):
         a_loss += sink_loss_a
         s_loss += sink_loss_s
 
-
         # KL Div LOSS
         pred_distribution_r = f.softmax(pred_r.flatten(start_dim=1), dim=-1)
         target_distribution_r = f.softmax(r_out.flatten(start_dim=1), dim=-1)
@@ -1662,10 +1690,42 @@ class teacher(nn.Module):
         #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
         #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
         # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-        #print( '0',entropy_loss*1e1,'1',grad_penalty*2e-2,'3',kl_loss*5e-4,'4',sink_loss*8e-1,'5',torch.mean(diff_fft_loss)*1e3,'6',critical_loss*1e-1,'7',torch.mean(diff_loss)*1e1,'8',torch.mean(fft_loss)*2e3,'9',2e1*torch.mean(value_loss),'10',ortho_mean*5e-4)
+        # print( '0',entropy_loss*1e1,'1',grad_penalty*2e-2,'3',kl_loss*5e-4,'4',sink_loss*8e-1,'5',torch.mean(diff_fft_loss)*1e3,'6',critical_loss*2e-1,'7',torch.mean(diff_loss)*1e1,'8',torch.mean(fft_loss)*2e3,'9',2e1*torch.mean(value_loss),'10',ortho_mean*1e-4,'11',log_det_jacobian_loss.mean()*2e-6,'12',b_loss*1e-3,'13',var_e_loss*3,'14',hf_e_loss)
         # final_loss =  entropy_loss+grad_penalty+kl_loss*1e-2+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
-        final_loss =  entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*1e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*5e-4
+
+        final_loss = entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*2e-6+b_loss*1e-3+var_e_loss*3+hf_e_loss
         return final_loss*1e-1
+
+    def boundary_loss(self,pred, target):
+        grad_pred_h = torch.abs(pred[:,  1:, :] - pred[:,  :-1, :])
+        grad_pred_w = torch.abs(pred[:,  :, 1:] - pred[:,  :, :-1])
+        grad_target_h = torch.abs(target[:,  1:, :] - target[:, :-1, :])
+        grad_target_w = torch.abs(target[:,  :, 1:] - target[:,  :, :-1])
+        boundary_h = torch.abs(grad_pred_h - grad_target_h).mean()
+        boundary_w = torch.abs(grad_pred_w - grad_target_w).mean()
+        return boundary_h + boundary_w
+
+    def total_variation_loss(self,pred):
+        tv_h = torch.abs(pred[:,  1:, :] - pred[:,  :-1, :]).mean()
+        tv_w = torch.abs(pred[:,  :, 1:] - pred[:,  :, :-1]).mean()
+        return tv_h + tv_w
+
+    def fft_high_frequency_loss(self,pred, target, cutoff_ratio=0.5):
+        _, H, W = pred.shape
+        fft_pred = torch.fft.fft2(pred, dim=(-2, -1))
+        fft_target = torch.fft.fft2(target, dim=(-2, -1))
+        fft_pred_shifted = torch.fft.fftshift(fft_pred, dim=(-2, -1))
+        fft_target_shifted = torch.fft.fftshift(fft_target, dim=(-2, -1))
+        mask = torch.ones((H, W), device=self.device)
+        center_x, center_y = H // 2, W // 2
+        cutoff_x = int(cutoff_ratio * center_x)
+        cutoff_y = int(cutoff_ratio * center_y)
+        mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 0.0
+        high_freq_pred = fft_pred_shifted * mask
+        high_freq_target = fft_target_shifted * mask
+        diff = torch.abs(high_freq_pred - high_freq_target)
+        loss = torch.mean(diff)
+        return loss
 
     def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
 
@@ -1677,7 +1737,7 @@ class teacher(nn.Module):
             self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
             self.noise_diff_out[idx])
 
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max, loss_weights = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, _, _,_,_,_, _ = model_output
         r_out = data_output[:, 0:self.model.in_scale, :][idx]
         g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
         b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]
