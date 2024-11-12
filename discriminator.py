@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from matplotlib import pyplot as plt
 import torch.nn.functional as f
+from torch.nn.utils import spectral_norm as sn
 
 
 class discriminator(nn.Module):
@@ -23,14 +24,14 @@ class discriminator(nn.Module):
         self.cutoff_ratio = torch.tensor([0.2])
         # Definition of the weights for fftfeature
         self.weights_data_0 = nn.Parameter(torch.rand(5 * self.in_scale ** 2, dtype=torch.float))
-        self.conv0_1x1 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1)
-        self.conv0_3x3 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
-        self.conv1_1x1 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1)
-        self.conv1_3x3 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
-        self.conv2_1x1 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1)
-        self.conv2_3x3 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
-        self.conv3_1x1 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1)
-        self.conv3_3x3 = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
+        self.conv0_1x1 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1))
+        self.conv0_3x3 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1))
+        self.conv1_1x1 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1))
+        self.conv1_3x3 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1))
+        self.conv2_1x1 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1))
+        self.conv2_3x3 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1))
+        self.conv3_1x1 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=1))
+        self.conv3_3x3 = sn(nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1))
 
         # Definition of Walsh-Hadamard rescale layers
         self.Walsh_Hadamard_rescaler_l0wh = nn.Linear(in_features=256, out_features=(5 * self.in_scale ** 2))
@@ -44,7 +45,7 @@ class discriminator(nn.Module):
         self.a = nn.Linear(in_features=int(self.in_scale ** 2) * 5, out_features=int(self.in_scale ** 2))
         self.s = nn.Linear(in_features=int(self.in_scale ** 2) * 5, out_features=int(self.in_scale ** 2))
 
-        self.disc_output =nn.utils.spectral_norm(nn.Linear(self.in_scale ** 2 * 5, 1, bias=True))
+        self.disc_output =sn(nn.Linear(self.in_scale ** 2 * 5, 1, bias=True))
         self.init_weights()
 
     def init_weights(self):

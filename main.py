@@ -36,8 +36,6 @@ nca_steps = 5
 learning = 1
 
 model = Fermionic_Bosonic_Space_State_NCA(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
-
-
 no_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Number of parameters in trained architecture :", round(no_params*1e-6,2),' [M]')
 
@@ -76,8 +74,8 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip * 2, criterion, optimizer,criterion_disc, disc_optimizer ,device, learning=learning,
-                     num_epochs=1000)
+                     num_epochs=200)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
-t.visualize_lerning(5)
+# t.visualize_lerning(5)
 t.examine(criterion, device, plot=1)

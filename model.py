@@ -149,7 +149,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.uplift_data(data))
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_in(x))
-        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
+        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
 
         x = self.act(self.cross_correlate_out(x))
         x = self.act(self.downlift_data(x))
@@ -185,7 +185,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         self.batch_size = old_batch_size
-        return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,self.loss_weights
+        return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss,self.loss_weights
 
     @staticmethod
     def binary(x, bits):
