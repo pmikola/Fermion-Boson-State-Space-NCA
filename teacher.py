@@ -1740,7 +1740,7 @@ class teacher(nn.Module):
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
             mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
-            fft_noise = fft_noise * mask  # Apply the mask
+            fft_noise = fft_noise * mask
             noise = torch.fft.irfft2(fft_noise, s=(H, W), dim=(-2, -1))
         return noise
 
