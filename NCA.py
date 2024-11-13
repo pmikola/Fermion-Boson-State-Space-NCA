@@ -218,11 +218,11 @@ class NCA(nn.Module):
 class FermionConvLayer(nn.Module):
     def __init__(self, channels,propagation_steps, kernel_size=3):
         super(FermionConvLayer, self).__init__()
-        self.fermion_gate_0 = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
-        self.fermion_gate_1 = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
+        self.fermion_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.fermion_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         # Note: Normalising flow
-        self.scale_net = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
-        self.shift_net = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
+        self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
         self.act = nn.ELU(alpha=2.)
         self.kernel_size= kernel_size
@@ -253,10 +253,10 @@ class FermionConvLayer(nn.Module):
 class BosonConvLayer(nn.Module):
     def __init__(self, channels,propagation_steps, kernel_size=3):
         super(BosonConvLayer, self).__init__()
-        self.boson_gate_0 = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
-        self.boson_gate_1 = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
-        self.scale_net = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
-        self.shift_net = sn(nn.Conv3d(channels, channels, kernel_size=1, bias=True))
+        self.boson_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.boson_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
         self.act = nn.ELU(alpha=2.)
         self.kernel_size = kernel_size

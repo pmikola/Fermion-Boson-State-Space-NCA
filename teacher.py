@@ -1107,20 +1107,27 @@ class teacher(nn.Module):
                 t_start = time.perf_counter()
                 model_output = self.model(dataset, spiking_probabilities)
                 t_pred = time.perf_counter()
-                loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
-                                             self.structure_input, self.structure_output, criterion_model, norm)
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
 
-                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output, self.structure_output,
-                                        criterion_disc)
+                if epoch == 0:
+                    self.disc_loss = [torch.tensor([0.5], device=self.device)]  # Ensure it's initialized
+
+                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
+                                                    self.structure_output,
+                                                    criterion_disc)
+
                 disc_optimizer.zero_grad(set_to_none=True)
                 disc_loss.backward()
                 disc_optimizer.step()
 
+                if epoch > 0:
+                    self.disc_loss.append(disc_loss.detach())
 
+                loss = self.loss_calculation(self.model, m_idx, model_output, self.data_input, self.data_output,
+                                             self.structure_input, self.structure_output, criterion_model, norm)
 
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
 
                 if self.validation_dataset is not None:
                     with torch.no_grad():
@@ -1130,7 +1137,7 @@ class teacher(nn.Module):
                                                          self.structure_output_val, criterion_model, norm)
 
                 self.train_loss.append(loss.item())
-                self.disc_loss.append(disc_loss.item())
+
                 self.val_loss.append(val_loss.item())
 
                 cpu_temp = WinTmp.CPU_Temp()
@@ -1222,7 +1229,7 @@ class teacher(nn.Module):
     def visualize_lerning(self, poly_degree=3):
         plt.plot(self.train_loss, color='blue',label='train')
         plt.plot(self.val_loss, color='orange',label='test')
-        plt.plot(self.disc_loss, color='red', label='disc')
+        plt.plot(self.disc_loss.tolist(), color='red', label='disc')
 
         plt.plot(self.cpu_temp,label='cpu_temp')
         plt.plot(self.gpu_temp,label='gpu_temp')
@@ -1460,12 +1467,12 @@ class teacher(nn.Module):
         boundary_loss_s = self.boundary_loss(t * pred_s + t_1 * s_out, s_out)
         b_loss  = torch.mean(boundary_loss_r+boundary_loss_g+boundary_loss_b+boundary_loss_a+boundary_loss_s)
 
-        v_loss_r = self.total_variation_loss(pred_r)
-        v_loss_g = self.total_variation_loss(pred_g)
-        v_loss_b = self.total_variation_loss(pred_b)
-        v_loss_a = self.total_variation_loss(pred_a)
-        v_loss_s = self.total_variation_loss(pred_s)
-        var_e_loss = torch.mean(v_loss_r + v_loss_g + v_loss_b + v_loss_a + v_loss_s)
+        # v_loss_r = self.total_variation_loss(pred_r)
+        # v_loss_g = self.total_variation_loss(pred_g)
+        # v_loss_b = self.total_variation_loss(pred_b)
+        # v_loss_a = self.total_variation_loss(pred_a)
+        # v_loss_s = self.total_variation_loss(pred_s)
+        # var_e_loss = torch.mean(v_loss_r + v_loss_g + v_loss_b + v_loss_a + v_loss_s)
 
         hf_loss_r = self.fft_high_frequency_loss(t * pred_r+ t_1 * r_out,r_out)
         hf_loss_g = self.fft_high_frequency_loss(t * pred_g + t_1 * g_out, g_out)
@@ -1474,11 +1481,11 @@ class teacher(nn.Module):
         hf_loss_s = self.fft_high_frequency_loss(t * pred_s + t_1 * s_out, s_out)
         hf_e_loss = torch.mean(hf_loss_r+hf_loss_g+hf_loss_b+hf_loss_a+hf_loss_s)
 
-        r_loss += boundary_loss_r + v_loss_r + hf_loss_r
-        g_loss += boundary_loss_g + v_loss_g + hf_loss_g
-        b_loss += boundary_loss_b + v_loss_b + hf_loss_b
-        a_loss += boundary_loss_a + v_loss_a + hf_loss_a
-        s_loss += boundary_loss_s + v_loss_s + hf_loss_s
+        r_loss += boundary_loss_r + hf_loss_r# + v_loss_r
+        g_loss += boundary_loss_g  + hf_loss_g#+ v_loss_g
+        b_loss += boundary_loss_b  + hf_loss_b#+ v_loss_b
+        a_loss += boundary_loss_a + hf_loss_a# + v_loss_a
+        s_loss += boundary_loss_s + hf_loss_s# + v_loss_s
         # # Note: Deep Supervision Loss cosine sim
         # rres, gres, bres, ares, sres = deepS
         # dpSWeight = 1.0
@@ -1648,59 +1655,15 @@ class teacher(nn.Module):
         temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
 
-        # A, B, C, D, E, F, G, H, I, J, K, L = torch.sigmoid(loss_weights)
-        #
-        # criterion.batch_size = value_loss.shape[0]
-        # gradient_penalty_loss = criterion.gradient_penalty(model)
-        #
-        # loss_tensor = torch.stack([A, B, C, D, E, F, G, H, I, J, K, L]).to(self.device)
-        # mean_loss = torch.abs(torch.mean(loss_tensor))
-        # variance_loss = torch.abs(torch.var(loss_tensor, unbiased=False))
-        # dispersion_loss = variance_loss / (mean_loss+1e-6)
-        # # print(gradient_penalty_loss[0])
-        # # Note: Normalisation of weights between each other
-        # LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
-        #         ssim_val, critical_loss, rec_loss)
-        # loss_weights = (A, B, C, D, E, F, G, H, J, K )
-        # total_weight = sum(loss_weights)+ 1e-4 * len(loss_weights)
-        # dynamic_weights = [w / total_weight for w in loss_weights]
-        # losses = (dynamic_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
-        # (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss, deepSLoss,
-        #  ssim_val, critical_loss, rec_loss) = losses
-        # LOSS = (value_loss, diff_loss, grad_loss, fft_loss, diff_fft_loss,hist_loss,deepSLoss,
-        #         ssim_val, gradient_penalty_loss, critical_loss, rec_loss, dispersion_loss)
-        #
-        # #aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1e3, 1e3, 1e4, 1e5,1e2, 1e5, 1e-1, 1e3, 1, 1e2, 1e4, 1.
-        # aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll = 1, 1, 1, 1,1, 1e5, 1, 1, 1, 1, 1, 1.
-        #
-        # loss_weights = (aa, bb, cc, dd, ee,ff,gg, hh, ii, jj, kk, ll)
-        # final_loss = sum(loss_weights[i] * torch.mean(losses) for i, losses in enumerate(LOSS))
-        #
-        # if self.epoch % 50 == 0:
-        #     print(A*aa * value_loss.mean().item(), "<- value_loss: A",
-        #           B *bb * diff_loss.mean().item(),"<- diff_loss: B",
-        #           C *cc * grad_loss.mean().item(), "<- grad_loss: C",
-        #           D *dd * fft_loss.mean().item(),"<- fft_loss: D",
-        #           E *ee * diff_fft_loss.mean().item(), "<- diff_fft_loss: E",
-        #           F *ff * hist_loss.mean().item(), "<- hist_loss: F",
-        #           G *gg * deepSLoss.mean().item(), "<- deepSLoss: G",
-        #           H *hh * ssim_val.mean().item(),"<- ssim_val: H",
-        #           I*ii*gradient_penalty_loss.mean().item() ,"<- gradient_penalty_loss: I",
-        #           J*jj*critical_loss.mean().item(), "<- critical loss: J",
-        #           K*kk*rec_loss.item(), "<- reconstruction loss: K",
-        #           L*ll*dispersion_loss.mean().item(),"<- dispersion loss: L")
-        # print(critical_loss.shape,ortho_mean.shape,torch.mean(diff_loss).shape,torch.mean(hist_loss).shape,torch.mean(fft_loss).shape,torch.mean(value_loss).shape,torch.mean(hist_loss_pdf).shape)
-        # print( '0',entropy_loss*1e1,'1',grad_penalty*2e-2,'3',kl_loss*5e-4,'4',sink_loss*8e-1,'5',torch.mean(diff_fft_loss)*1e3,'6',critical_loss*2e-1,'7',torch.mean(diff_loss)*1e1,'8',torch.mean(fft_loss)*2e3,'9',2e1*torch.mean(value_loss),'10',ortho_mean*1e-4,'11',log_det_jacobian_loss.mean()*2e-6,'12',b_loss*1e-3,'13',var_e_loss*3,'14',hf_e_loss)
-        # final_loss =  entropy_loss+grad_penalty+kl_loss*1e-2+sink_loss+torch.mean(diff_fft_loss)*1e3+critical_loss+torch.mean(diff_loss)*2e-5+torch.mean(fft_loss)*2e3+2e0*torch.mean(value_loss)+ortho_mean*5e-2
-
-        final_loss = entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*2e-6+b_loss*1e-3+var_e_loss*3+hf_e_loss-freq_loss.mean()*1e-3
+        disc_loss = -torch.log(self.disc_loss[-1])*1e1 + 1e-8
+        final_loss = disc_loss+entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*2e-6+b_loss*1e-3+hf_e_loss-freq_loss.mean()*1e-3
         return final_loss*1e-1
 
     def boundary_loss(self,pred, target):
-        grad_pred_h = torch.abs(pred[:,  1:, :] - pred[:,  :-1, :])
-        grad_pred_w = torch.abs(pred[:,  :, 1:] - pred[:,  :, :-1])
-        grad_target_h = torch.abs(target[:,  1:, :] - target[:, :-1, :])
-        grad_target_w = torch.abs(target[:,  :, 1:] - target[:,  :, :-1])
+        grad_pred_h = torch.abs(pred[:,  0:2, :] - pred[:,  -3:-1, :])
+        grad_pred_w = torch.abs(pred[:,  :, 0:2] - pred[:,  :, -3:-1])
+        grad_target_h = torch.abs(target[:,  0:2, :] - target[:, -3:-1, :])
+        grad_target_w = torch.abs(target[:,  :, 0:2] - target[:,  :, -3:-1])
         boundary_h = torch.abs(grad_pred_h - grad_target_h).mean()
         boundary_w = torch.abs(grad_pred_w - grad_target_w).mean()
         return boundary_h + boundary_w
@@ -1710,19 +1673,16 @@ class teacher(nn.Module):
         tv_w = torch.abs(pred[:,  :, 1:] - pred[:,  :, :-1]).mean()
         return tv_h + tv_w
 
-    def fft_high_frequency_loss(self,pred, target, cutoff_ratio=0.8):
-        _, H, W = pred.shape
-        fft_pred = torch.fft.fft2(pred, dim=(-2, -1))
-        fft_target = torch.fft.fft2(target, dim=(-2, -1))
-        fft_pred_shifted = torch.fft.fftshift(fft_pred, dim=(-2, -1))
-        fft_target_shifted = torch.fft.fftshift(fft_target, dim=(-2, -1))
-        mask = torch.ones((H, W), device=self.device)
-        center_x, center_y = H // 2, W // 2
+    def fft_high_frequency_loss(self, pred, target, cutoff_ratio=0.8):
+        B, H, W = pred.shape
+        fft_pred = torch.fft.rfft2(pred, dim=(-2, -1))
+        fft_target = torch.fft.rfft2(target, dim=(-2, -1))
+        mask = torch.ones((B, H, W // 2 + 1), device=self.device)
+        center_x = H // 2
         cutoff_x = int(cutoff_ratio * center_x)
-        cutoff_y = int(cutoff_ratio * center_y)
-        mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 0.0
-        high_freq_pred = fft_pred_shifted * mask
-        high_freq_target = fft_target_shifted * mask
+        mask[:, center_x - cutoff_x:center_x + cutoff_x, :] = 0.0
+        high_freq_pred = fft_pred * mask
+        high_freq_target = fft_target * mask
         diff = torch.abs(high_freq_pred - high_freq_target)
         loss = torch.mean(diff)
         return loss
@@ -1746,7 +1706,7 @@ class teacher(nn.Module):
 
     def fft_hf_data(self, data):
         cutoff_ratio = torch.rand((1,)).to(self.device)
-        if cutoff_ratio < 0.1:
+        if cutoff_ratio < 0.7:
             pass
         else:
             H, W = data.shape
@@ -1771,11 +1731,11 @@ class teacher(nn.Module):
             self.noise_diff_out[idx])
 
         pred_r, pred_g, pred_b, pred_a, pred_s, _, _,_,_,_,_,_ = model_output
-        r_out = data_output[:, 0:self.model.in_scale, :][idx]
-        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
-        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]
-        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]
-        s_out = structure_output[idx]
+        r_out = data_output[:, 0:self.model.in_scale, :][idx].detach()
+        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx].detach()
+        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx].detach()
+        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx].detach()
+        s_out = structure_output[idx].detach()
 
         pred = torch.cat([pred_r.detach().unsqueeze(1), pred_g.detach().unsqueeze(1), pred_b.detach().unsqueeze(1), pred_a.detach().unsqueeze(1), pred_s.detach().unsqueeze(1)], dim=1)
         true = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1), s_out.unsqueeze(1)], dim=1)
