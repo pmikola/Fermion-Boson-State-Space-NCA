@@ -47,7 +47,7 @@ if learning == 0:
 else:
     discriminator = discriminator(no_frame_samples, batch_size, input_window_size, device).to(device)
     t = teacher(model, discriminator, device)
-    disc_optimizer = torch.optim.Adam(t.discriminator.parameters(), lr=2e-4, betas=(0.9, 0.999), eps=1e-08,
+    disc_optimizer = torch.optim.Adam(t.discriminator.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08,
                                   weight_decay=1e-5, amsgrad=True)
 
 t.seed_setter(2024)

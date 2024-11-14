@@ -4,6 +4,7 @@ import time
 import torch
 import torch.nn as nn
 from linformer import Linformer
+from torch.nn.utils import spectral_norm as sn
 
 from NCA import NCA
 

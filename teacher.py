@@ -1182,8 +1182,8 @@ class teacher(nn.Module):
                     # NOTE: lowering lr for  better performance and reset lr within conditions
                     if grad_counter == 20 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.99
-                            if param_group['lr'] < 5e-6 or reiterate_data == 0:
+                            param_group['lr'] = param_group['lr'] * 0.999
+                            if param_group['lr'] < 1e-6: #or reiterate_data == 0:
                                 param_group['lr'] = 2e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0

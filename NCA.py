@@ -2,6 +2,7 @@ import time
 
 import torch
 from linformer import Linformer
+from matplotlib import pyplot as plt
 from torch import nn
 from WaveletModel import WaveletModel
 from torch.nn.utils import spectral_norm as sn
@@ -146,8 +147,6 @@ class NCA(nn.Module):
                     k_idx += 1
                     l_idx = h_idx
 
-
-
                 fermionic_response,f_log_det_jacobian = self.fermionic_NCA(energy_spectrum,meta_embeddings,i, weights=f_kernels)
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response,b_log_det_jacobian = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
@@ -187,6 +186,8 @@ class NCA(nn.Module):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
         fft_k_shifted = torch.fft.fftshift(fft_k)
+
+
         mask_lf = torch.zeros((C, HDC, H, W, D), device=self.device)
         center_ch,center_hdc,center_x, center_y, center_z = (C+1)//2, (HDC+1)// 2, (H+1) // 2, (W +1)// 2,( D +1)// 2
         cutoff_ch = int(cutoff_ratio * center_ch)
