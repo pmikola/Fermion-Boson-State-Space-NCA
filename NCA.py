@@ -88,13 +88,17 @@ class NCA(nn.Module):
         self.step_param = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
 
-    def nca_update(self, x,meta_embeddings,spiking_probabilities,batch_size):
+    def nca_update(self, x,meta_embeddings,spiking_probabilities,hf_data,batch_size):
         self.batch_size = batch_size
         nca_var = torch.zeros((x.shape[0],self.num_steps), requires_grad=True).to(self.device)
         log_det_j_loss = torch.zeros((x.shape[0],self.num_steps), requires_grad=True).to(self.device)
         freq_loss = torch.zeros((self.fermion_kernels_size.shape[0],self.num_steps), requires_grad=True).to(self.device)
 
         nca_out_odd = [self.act(layer(x)) for layer in self.nca_layers_odd]
+        # if self.training:
+        #     freq_loss_nca = torch.mean(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.nca_layers_odd],dim=0))
+        # else:
+        #     freq_loss_nca = None
         x = torch.sum(torch.stack(nca_out_odd), dim=0)
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
@@ -130,7 +134,7 @@ class NCA(nn.Module):
                     f_k = fermion_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
                                                             k_size.int(), k_size.int())
                     f_kernels.append(f_k)
-                    freq_loss[k_idx,i] = self.fft_high_frequency_loss(f_k)
+                    freq_loss[k_idx,i] = self.fft_high_frequency_loss(f_k,hf_data)
                     k_idx +=1
                     l_idx = h_idx
 
@@ -143,7 +147,7 @@ class NCA(nn.Module):
                     b_k = boson_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
                                                           k_size.int(), k_size.int())
                     b_kernels.append(b_k)
-                    freq_loss[k_idx, i] += self.fft_high_frequency_loss(b_k)
+                    freq_loss[k_idx, i] += self.fft_high_frequency_loss(b_k,hf_data)
                     k_idx += 1
                     l_idx = h_idx
 
@@ -178,16 +182,14 @@ class NCA(nn.Module):
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
         return energy_spectrum,nca_var,ortho_mean,ortho_max,log_det_j_loss,freq_loss
 
-    def forward(self, x,meta_embeddings,spiking_probabilities,batch_size):
-        x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,batch_size)
+    def forward(self, x,meta_embeddings,spiking_probabilities,hf_data,batch_size):
+        x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
 
-    def fft_high_frequency_loss(self,kernels, cutoff_ratio=0.5):
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.5):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
         fft_k_shifted = torch.fft.fftshift(fft_k)
-
-
         mask_lf = torch.zeros((C, HDC, H, W, D), device=self.device)
         center_ch,center_hdc,center_x, center_y, center_z = (C+1)//2, (HDC+1)// 2, (H+1) // 2, (W +1)// 2,( D +1)// 2
         cutoff_ch = int(cutoff_ratio * center_ch)
@@ -196,11 +198,11 @@ class NCA(nn.Module):
         cutoff_y = int(cutoff_ratio * center_y)
         cutoff_z = int(cutoff_ratio * center_z)
         mask_lf[center_ch - cutoff_ch:center_ch + cutoff_ch,center_hdc - cutoff_hdc:center_hdc + cutoff_hdc,center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y,center_z - cutoff_z:center_z + cutoff_z] = 1.
-        high_freq_k = fft_k_shifted * 1- mask_lf
+        high_freq_k = fft_k_shifted * ( 1- mask_lf)
         low_freq_k = fft_k_shifted * mask_lf
         hf_mean = torch.abs(high_freq_k.mean())
         lf_mean = torch.abs(low_freq_k.mean())
-        loss = (hf_mean / (1+lf_mean))
+        loss = (hf_mean / (lf_mean+hf_data))
         return loss
 
     def validate_channel_orthogonality(self,particles):

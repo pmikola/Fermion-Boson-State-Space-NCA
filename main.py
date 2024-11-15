@@ -73,8 +73,8 @@ for period in range(1, no_periods + 1):
     t.fsim.fuel_dens_modifier = 1 / t.fsim.dt
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
-                     last_frame, frame_skip * 2, criterion, optimizer,criterion_disc, disc_optimizer ,device, learning=learning,
-                     num_epochs=1000)
+                     last_frame, frame_skip*2, criterion, optimizer,criterion_disc, disc_optimizer ,device, learning=learning,
+                     num_epochs=500)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
 # t.visualize_lerning(5)

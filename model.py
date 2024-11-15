@@ -20,7 +20,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.hdc_dim = hdc_dim
         self.rbf_dim = rbf_dim
         self.in_scale = (1 + self.input_window_size * 2)
-        self.loss_weights = nn.Parameter(torch.ones(12))
+        self.loss_weights = nn.Parameter(torch.ones(16))
         self.modes = 32
         self.uplift_meta_0 = nn.Linear(200,15*self.modes)
         self.uplift_meta_1 = nn.Linear(15*self.modes, 5 * self.in_scale ** 2)
@@ -136,7 +136,10 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         a_in = data_input[:, self.in_scale * 3:self.in_scale * 4, :].unsqueeze(1)
         s_in = structure_input.unsqueeze(1)
         data = torch.cat([r_in,g_in,b_in,a_in,s_in],dim=1)
-
+        if self.training:
+            hf_data = self.high_frequency_extraction(data)
+        else:
+            hf_data = None
         time_in,time_out = meta_input_h2,meta_output_h2
         pos_in,pos_out = meta_input_h3,meta_output_h3
 
@@ -150,7 +153,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.uplift_data(data))
         x = x.unsqueeze(1)
         x = self.act(self.cross_correlate_in(x))
-        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x,meta_embeddings,spiking_probabilities,self.batch_size)
+        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x,meta_embeddings,spiking_probabilities,hf_data,self.batch_size)
 
         x = self.act(self.cross_correlate_out(x))
         x = self.act(self.downlift_data(x))
@@ -185,8 +188,84 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         #t_stop = time.perf_counter()
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
+        if self.training:
+            hf_loss =self.fft_high_frequency_loss(self.r_h.weight,hf_data)
+            hf_loss +=self.fft_high_frequency_loss(self.g_h.weight,hf_data)
+            hf_loss +=self.fft_high_frequency_loss(self.b_h.weight,hf_data)
+            hf_loss +=self.fft_high_frequency_loss(self.a_h.weight,hf_data)
+            hf_loss +=self.fft_high_frequency_loss(self.s_h.weight,hf_data)
+
+            # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.r]), dim=0)
+            # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.g]), dim=0)
+            # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.b]), dim=0)
+            # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.a]), dim=0)
+            # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.s]), dim=0)
+
+            hf_loss += self.fft_high_frequency_loss(self.rgbas.weight,hf_data)
+            hf_loss += self.fft_high_frequency_loss(self.downlift_data.weight,hf_data)
+            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_out.weight,hf_data)
+            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_in.weight,hf_data)
+            hf_loss += self.fft_high_frequency_loss( self.uplift_data.weight,hf_data)
+
+            freq_loss += hf_loss
         self.batch_size = old_batch_size
         return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss,self.loss_weights
+
+    def high_frequency_extraction(self,data, cutoff_ratio=0.5):
+        C, H, W, D = data.shape
+        mask_lf = torch.zeros((C, H, W, D), device=self.device)
+        fft_d = torch.fft.fftn(data)
+        fft_d_shifted = torch.fft.fftshift(fft_d)
+        center_ch, center_x, center_y, center_z = (C + 1) // 2, (H + 1) // 2, (W + 1) // 2, (D + 1) // 2
+        cutoff_ch = int(cutoff_ratio * center_ch)
+        cutoff_x = int(cutoff_ratio * center_x)
+        cutoff_y = int(cutoff_ratio * center_y)
+        cutoff_z = int(cutoff_ratio * center_z)
+        mask_lf[center_ch - cutoff_ch:center_ch + cutoff_ch,
+        center_x - cutoff_x:center_x + cutoff_x,
+        center_y - cutoff_y:center_y + cutoff_y,
+        center_z - cutoff_z:center_z + cutoff_z] = 1.
+        high_freq_k = fft_d_shifted * (1 - mask_lf)
+        hf_mean = torch.abs(high_freq_k.mean())
+        return hf_mean
+
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.5):
+        if len(kernels.shape) == 4:
+            C,H, W, D = kernels.shape
+            mask_lf = torch.zeros((C, H, W, D), device=self.device)
+            fft_k = torch.fft.fftn(kernels)
+            fft_k_shifted = torch.fft.fftshift(fft_k)
+            center_ch,center_x, center_y, center_z = (C+1)//2, (H+1) // 2, (W +1)// 2,( D +1)// 2
+            cutoff_ch = int(cutoff_ratio * center_ch)
+            cutoff_x = int(cutoff_ratio * center_x)
+            cutoff_y = int(cutoff_ratio * center_y)
+            cutoff_z = int(cutoff_ratio * center_z)
+            mask_lf[center_ch - cutoff_ch:center_ch + cutoff_ch,
+            center_x - cutoff_x:center_x + cutoff_x,
+            center_y - cutoff_y:center_y + cutoff_y,
+            center_z - cutoff_z:center_z + cutoff_z] = 1.
+        else:
+            C,HDC, H, W, D = kernels.shape
+            mask_lf = torch.zeros((C, HDC, H, W, D), device=self.device)
+            fft_k = torch.fft.fftn(kernels)
+            fft_k_shifted = torch.fft.fftshift(fft_k)
+            center_ch,center_hdc,center_x, center_y, center_z = (C+1)//2, (HDC+1)// 2, (H+1) // 2, (W +1)// 2,( D +1)// 2
+            cutoff_ch = int(cutoff_ratio * center_ch)
+            cutoff_hdc = int(cutoff_ratio * center_hdc)
+            cutoff_x = int(cutoff_ratio * center_x)
+            cutoff_y = int(cutoff_ratio * center_y)
+            cutoff_z = int(cutoff_ratio * center_z)
+            mask_lf[center_ch - cutoff_ch:center_ch + cutoff_ch,
+            center_hdc - cutoff_hdc:center_hdc + cutoff_hdc,
+            center_x - cutoff_x:center_x + cutoff_x,
+            center_y - cutoff_y:center_y + cutoff_y,
+            center_z - cutoff_z:center_z + cutoff_z] = 1.
+        high_freq_k = fft_k_shifted * (1 - mask_lf)
+        low_freq_k = fft_k_shifted * mask_lf
+        hf_mean = torch.abs(high_freq_k.mean())
+        lf_mean = torch.abs(low_freq_k.mean())
+        loss = (hf_mean / (lf_mean+hf_data))
+        return loss
 
     @staticmethod
     def binary(x, bits):

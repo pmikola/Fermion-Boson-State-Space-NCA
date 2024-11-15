@@ -289,21 +289,21 @@ class teacher(nn.Module):
             slice_y_out = slice(window_y_out[0], window_y_out[-1] + 1)
 
             # Note : Input data
-            fuel_subslice_in = self.fft_hf_data(self.fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_hf_noise(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
+            fuel_subslice_in = self.fft_data(self.fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * self.fft_noise(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
                     self.device),
                 nan=0.0))
-            r_subslice_in = self.fft_hf_data(self.r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_hf_noise(self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            r_subslice_in = self.fft_data(self.r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * self.fft_noise(self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
-            g_subslice_in = self.fft_hf_data(self.g_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_hf_noise(self.g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            g_subslice_in = self.fft_data(self.g_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * self.fft_noise(self.g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
-            b_subslice_in = self.fft_hf_data(self.b_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_hf_noise(self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+            b_subslice_in = self.fft_data(self.b_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * self.fft_noise(self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
-            alpha_subslice_in = self.fft_hf_data(self.alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_hf_noise(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
+            alpha_subslice_in = self.fft_data(self.alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
+                noise_variance_in * self.fft_noise(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
                     self.device),
                 nan=0.0))
             data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=0)
@@ -322,22 +322,22 @@ class teacher(nn.Module):
                                              meta_ignition_temp_in, meta_viscosity_in, meta_diff_in], dim=0)
 
             # Note : Output data
-            fuel_subslice_out = self.fft_hf_data(self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.fft_hf_noise(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(
+            fuel_subslice_out = self.fft_data(self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * self.fft_noise(self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),
                 nan=0.0))
-            r_subslice_out = self.fft_hf_data(self.r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out *self.fft_hf_noise(self.r_slices[idx_output, slice_x_out, slice_y_out]).to(
+            r_subslice_out = self.fft_data(self.r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out *self.fft_noise(self.r_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),
                 nan=0.0))
-            g_subslice_out = self.fft_hf_data(self.g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.fft_hf_noise(self.g_slices[idx_output, slice_x_out, slice_y_out]).to(
+            g_subslice_out = self.fft_data(self.g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * self.fft_noise(self.g_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),
                 nan=0.0))
-            b_subslice_out = self.fft_hf_data(self.b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.fft_hf_noise(self.b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0))
-            alpha_subslice_out = self.fft_hf_data(self.alpha_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.fft_hf_noise(self.alpha_slices[idx_output, slice_x_out, slice_y_out]).to(
+            b_subslice_out = self.fft_data(self.b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * self.fft_noise(self.b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0))
+            alpha_subslice_out = self.fft_data(self.alpha_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
+                noise_variance_out * self.fft_noise(self.alpha_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device), nan=0.0))
             data_output_subslice = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out],
                                              dim=0)
@@ -1111,13 +1111,14 @@ class teacher(nn.Module):
                 if epoch == 0:
                     self.disc_loss = [torch.tensor([0.5], device=self.device)]  # Ensure it's initialized
 
-                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
-                                                    self.structure_output,
-                                                    criterion_disc)
+                if epoch % 2 == 0:
+                    disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
+                                                        self.structure_output,
+                                                        criterion_disc)
 
-                disc_optimizer.zero_grad(set_to_none=True)
-                disc_loss.backward()
-                disc_optimizer.step()
+                    disc_optimizer.zero_grad(set_to_none=True)
+                    disc_loss.backward()
+                    disc_optimizer.step()
 
                 if epoch > 0:
                     self.disc_loss.append(disc_loss.detach())
@@ -1182,8 +1183,8 @@ class teacher(nn.Module):
                     # NOTE: lowering lr for  better performance and reset lr within conditions
                     if grad_counter == 20 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.999
-                            if param_group['lr'] < 1e-6: #or reiterate_data == 0:
+                            param_group['lr'] = param_group['lr'] * 0.9995
+                            if param_group['lr'] < 2e-4: #or reiterate_data == 0:
                                 param_group['lr'] = 2e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
@@ -1229,7 +1230,7 @@ class teacher(nn.Module):
     def visualize_lerning(self, poly_degree=3):
         plt.plot(self.train_loss, color='blue',label='train')
         plt.plot(self.val_loss, color='orange',label='test')
-        plt.plot(self.disc_loss.tolist(), color='red', label='disc')
+        plt.plot(np.array(torch.tensor(self.disc_loss).cpu()), color='red', label='disc')
 
         plt.plot(self.cpu_temp,label='cpu_temp')
         plt.plot(self.gpu_temp,label='gpu_temp')
@@ -1252,7 +1253,7 @@ class teacher(nn.Module):
 
     def loss_calculation(self, model, idx, model_output, data_input, data_output, structure_input, structure_output,
                          criterion,norm='backward'):
-        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss, loss_weights = model_output
+        pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss, lw = model_output
 
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
@@ -1366,26 +1367,6 @@ class teacher(nn.Module):
         diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s, dim=[1, 2])
         # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
 
-        # # Note: Gradient loss
-        # grad_r_true = torch.gradient(r_out)[0]
-        # grad_r_pred = torch.gradient(pred_r)[0]
-        # grad_r = criterion(t * grad_r_pred + t_1 * grad_r_true, grad_r_true)
-        # grad_g_true = torch.gradient(g_out)[0]
-        # grad_g_pred = torch.gradient(pred_g)[0]
-        # grad_g = criterion(t * grad_g_pred + t_1 * grad_g_true, grad_g_true)
-        # grad_b_true = torch.gradient(b_out)[0]
-        # grad_b_pred = torch.gradient(pred_b)[0]
-        # grad_b = criterion(t * grad_b_pred + t_1 * grad_b_true, grad_b_true)
-        # grad_a_true = torch.gradient(a_out)[0]
-        # grad_a_pred = torch.gradient(pred_a)[0]
-        # grad_a = criterion(t * grad_a_pred + t_1 * grad_a_true, grad_a_true)
-        # grad_s_true = torch.gradient(s_out)[0]
-        # grad_s_pred = torch.gradient(pred_s)[0]
-        # grad_s = criterion(t * grad_s_pred + t_1 * grad_s_true, grad_s_true)
-        #
-        # grad_loss = torch.mean(grad_r + grad_g + grad_b + grad_a + grad_s, dim=[1, 2])
-        # # grad_loss = grad_r + grad_g + grad_b + grad_a + grad_s
-        #
         # Note: Fourier loss
         fft_out_pred_r = torch.real(torch.fft.rfft2(pred_r, norm=norm))
         fft_out_true_r = torch.real(torch.fft.rfft2(r_out, norm=norm))
@@ -1487,98 +1468,10 @@ class teacher(nn.Module):
         a_loss += boundary_loss_a + hf_loss_a# + v_loss_a
         s_loss += boundary_loss_s + hf_loss_s# + v_loss_s
         # # Note: Deep Supervision Loss cosine sim
-        # rres, gres, bres, ares, sres = deepS
-        # dpSWeight = 1.0
-        # cosine_loss_rres = 1 - torch.nn.functional.cosine_similarity(rres.flatten(1), r_out.flatten(1), dim=1).mean()
-        # cosine_loss_gres = 1 - torch.nn.functional.cosine_similarity(gres.flatten(1), g_out.flatten(1), dim=1).mean()
-        # cosine_loss_bres = 1 - torch.nn.functional.cosine_similarity(bres.flatten(1), b_out.flatten(1), dim=1).mean()
-        # cosine_loss_ares = 1 - torch.nn.functional.cosine_similarity(ares.flatten(1), a_out.flatten(1), dim=1).mean()
-        # cosine_loss_sres = 1 - torch.nn.functional.cosine_similarity(sres.flatten(1), s_out.flatten(1), dim=1).mean()
-        # deepSLoss = dpSWeight * (cosine_loss_rres + cosine_loss_gres + cosine_loss_bres + cosine_loss_ares + cosine_loss_sres) / 5
-        #
+
         t = t.squeeze()
         t_1 = t_1.squeeze()
-        # Solution for learning and maintaining of the proper color and other element space
-        # bandwidth = 1.#torch.tensor(1.).to(self.device)  # Note: Higher value less noise (gaussian smoothing)
-        # bins = 256  # Note: 256 values
-        # r_out = torch.flatten(r_out, start_dim=1)
-        # pred_r = torch.flatten(pred_r, start_dim=1)
-        # r_true_hist,r_true_hist_pdf = kornia.enhance.image_histogram2d(image=r_out,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
-        # r_pred_hist,r_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_r,n_bins=bins,max=1.,bandwidth=bandwidth,return_pdf=True)
-        # r_hist_loss_pdf = criterion(t * r_pred_hist_pdf + t_1 * r_true_hist_pdf, r_true_hist_pdf)
-        # r_hist_loss = criterion(t * r_pred_hist + t_1 * r_true_hist, r_true_hist)
-        #
-        # g_out = torch.flatten(g_out, start_dim=1)
-        # pred_g = torch.flatten(pred_g, start_dim=1)
-        # g_true_hist,g_true_hist_pdf = kornia.enhance.image_histogram2d(image=g_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # g_pred_hist,g_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_g, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # # g_true_hist_max = g_true_hist.max()
-        # # g_true_hist = g_true_hist / (g_true_hist_max + 1e-9)
-        # # g_pred_hist_max = g_pred_hist.max()
-        # # g_pred_hist = g_pred_hist / (g_pred_hist_max + 1e-9)
-        # g_hist_loss_pdf = criterion(t * g_pred_hist_pdf + t_1 * g_true_hist_pdf, g_true_hist_pdf)
-        # g_hist_loss = criterion(t * g_pred_hist + t_1 * g_true_hist, g_true_hist)
-        #
-        #
-        # b_out = torch.flatten(b_out, start_dim=1)
-        # pred_b = torch.flatten(pred_b, start_dim=1)
-        # b_true_hist,b_true_hist_pdf = kornia.enhance.image_histogram2d(image=b_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # b_pred_hist,b_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_b, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # # b_true_hist_max = b_true_hist.max()
-        # # b_true_hist = b_true_hist / (b_true_hist_max + 1e-9)
-        # # b_pred_hist_max = b_pred_hist.max()
-        # # b_pred_hist = b_pred_hist / (b_pred_hist_max + 1e-9)
-        # b_hist_loss_pdf = criterion(t * b_pred_hist_pdf + t_1 * b_true_hist_pdf, b_true_hist_pdf)
-        # b_hist_loss = criterion(t * b_pred_hist + t_1 * b_true_hist, b_true_hist)
-        #
-        #
-        # a_out = torch.flatten(a_out, start_dim=1)
-        # pred_a = torch.flatten(pred_a, start_dim=1)
-        # a_true_hist,a_true_hist_pdf = kornia.enhance.image_histogram2d(image=a_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # a_pred_hist,a_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_a, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # # a_true_hist_max = a_true_hist.max()
-        # # a_true_hist = a_true_hist / (a_true_hist_max + 1e-9)
-        # # a_pred_hist_max = a_pred_hist.max()
-        # # a_pred_hist = a_pred_hist / (a_pred_hist_max + 1e-9)
-        # a_hist_loss_pdf = criterion(t * a_pred_hist_pdf + t_1 * a_true_hist_pdf, a_true_hist_pdf)
-        # a_hist_loss = criterion(t * a_pred_hist + t_1 * a_true_hist, a_true_hist)
-        #
-        #
-        # s_out = torch.flatten(s_out, start_dim=1)
-        # pred_s = torch.flatten(pred_s, start_dim=1)
-        # s_true_hist,s_true_hist_pdf = kornia.enhance.image_histogram2d(image=s_out, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # s_pred_hist,s_pred_hist_pdf = kornia.enhance.image_histogram2d(image=pred_s, n_bins=bins, max=1., bandwidth=bandwidth,return_pdf=True)
-        # # s_true_hist_max = s_true_hist.max()
-        # # s_true_hist = s_true_hist / (s_true_hist_max + 1e-9)
-        # # s_pred_hist_max = s_pred_hist.max()
-        # # s_pred_hist = s_pred_hist / (s_pred_hist_max + 1e-9)
-        # s_hist_loss_pdf = criterion(t * s_pred_hist_pdf + t_1 * s_true_hist_pdf, s_true_hist_pdf)
-        # s_hist_loss = criterion(t * s_pred_hist + t_1 * s_true_hist, s_true_hist)
-        #
-        # hist_loss = torch.mean(r_hist_loss + b_hist_loss + g_hist_loss + a_hist_loss + s_hist_loss)
-        # hist_loss_pdf = torch.mean(r_hist_loss_pdf + b_hist_loss_pdf + g_hist_loss_pdf + a_hist_loss_pdf + s_hist_loss_pdf)
 
-        #
-        # # Note: SSIM Loss
-        # l = self.batch_size
-        # indices = torch.randperm(r_out.size(0))
-        # selected_indices = indices[:l]
-        # r_out_img = r_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # g_out_img = g_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # b_out_img = b_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # a_out_img = a_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # s_out_img = s_out[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # r_pred_img = pred_r[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # g_pred_img = pred_g[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # b_pred_img = pred_b[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # a_pred_img = pred_a[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # s_pred_img = pred_s[selected_indices].view(self.batch_size, self.model.in_scale, self.model.in_scale)
-        # rgbas_out = torch.stack([r_out_img, g_out_img, b_out_img, a_out_img, s_out_img], dim=-1)
-        # rgbas_pred = torch.stack([r_pred_img, g_pred_img, b_pred_img, a_pred_img, s_pred_img], dim=-1)
-        # rgbas_out = torch.permute(rgbas_out, (0, 3, 1, 2))
-        # rgbas_pred = torch.permute(rgbas_pred, (0, 3, 1, 2))
-        # ssim_val = 1 - self.ssim_loss(tt.unsqueeze(2) * rgbas_out + tt_1.unsqueeze(2) * rgbas_pred, rgbas_pred).mean()
-        #
         # NCA Criticality loss
         target_variance = torch.full_like(nca_var,0.49,requires_grad=True)
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
@@ -1654,9 +1547,15 @@ class teacher(nn.Module):
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
         temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
-
         disc_loss = -torch.log(self.disc_loss[-1])*1e1 + 1e-8
+
+        # lw_min = lw.min()
+        # lw_range = lw.max() - loss_min + 1e-12
+        # normalized_lw_coeffs = (lw - lw_min) / lw_range
+        # temperature = 30.# + 0.5 * normalized_lw_coeffs.std().item()
+        # lw = f.softmax((normalized_lw_coeffs.max() - normalized_lw_coeffs) / temperature, dim=0)
         final_loss = disc_loss+entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*2e-6+b_loss*1e-3+hf_e_loss-freq_loss.mean()*1e-3
+#        print(lw[0]*disc_loss.item(),lw[1]*entropy_loss.item()*5e1,lw[2]*grad_penalty.item()*2e-1,lw[3]*kl_loss.item()*1e-3,lw[4]*sink_loss.item()*8e-1,lw[5]*torch.mean(diff_fft_loss).item()*1e4,lw[6]*critical_loss.item()*5,lw[7]*torch.mean(diff_loss).item()*3e1,lw[8]*torch.mean(fft_loss).item()*2e4,lw[9]*2e1*torch.mean(value_loss).item(),lw[11]*ortho_mean.item()*1e-4,lw[12]*log_det_jacobian_loss.mean().item()*2e-5,lw[13]*b_loss.item()*1e-3,lw[14]*hf_e_loss.item(),-lw[15]*freq_loss.mean().item()*3e-3)
         return final_loss*1e-1
 
     def boundary_loss(self,pred, target):
@@ -1687,7 +1586,7 @@ class teacher(nn.Module):
         loss = torch.mean(diff)
         return loss
 
-    def fft_hf_noise(self, noise):
+    def fft_noise(self, noise):
         cutoff_ratio = torch.rand((1,)).to(self.device)
         if cutoff_ratio < 0.5:
             pass
@@ -1695,29 +1594,39 @@ class teacher(nn.Module):
             noise = torch.rand_like(noise, device=self.device)
             H, W = noise.shape
             fft_noise = torch.fft.rfft2(noise, dim=(-2, -1))
-            mask = torch.ones_like(fft_noise, device=self.device)
+            fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
+            mask = torch.ones_like(fft_noise_shifted, device=self.device)
             center_x, center_y = H // 2, (W // 2 + 1) // 2
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
             mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
             fft_noise = fft_noise * mask
-            noise = torch.fft.irfft2(fft_noise, s=(H, W), dim=(-2, -1))
+            fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
+            noise = torch.fft.irfft2(fft_noise_shifted, s=(H, W), dim=(-2, -1))
         return noise
 
-    def fft_hf_data(self, data):
+    def fft_data(self, data):
         cutoff_ratio = torch.rand((1,)).to(self.device)
-        if cutoff_ratio < 0.7:
+        if cutoff_ratio < 0.5:
             pass
         else:
             H, W = data.shape
             fft_data = torch.fft.rfft2(data, dim=(-2, -1))
-            mask = torch.ones((H, W // 2 + 1), device=self.device)
+            fft_data = torch.fft.fftshift(fft_data, dim=(-2, -1))
+            mask = torch.zeros((H, W // 2 + 1), device=self.device)
             center_x, center_y = H // 2, (W // 2 + 1) // 2
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
-            mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 0.0
-            high_freq_pred = fft_data * mask
-            data = torch.fft.irfft2(high_freq_pred, s=(H, W), dim=(-2, -1))
+            if self.epoch < self.num_of_epochs*0.3:
+                mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 1
+                high_freq_pred = fft_data * mask
+            if self.num_of_epochs*0.3 <= self.epoch <= self.num_of_epochs*0.6:
+                high_freq_pred = fft_data
+            else:
+                mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 1
+                high_freq_pred = fft_data * (1-mask)
+            high_freq_pred_shifted = torch.fft.ifftshift(high_freq_pred, dim=(-2, -1))
+            data = torch.fft.irfft2(high_freq_pred_shifted, s=(H, W), dim=(-2, -1))
         return data
 
     def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
