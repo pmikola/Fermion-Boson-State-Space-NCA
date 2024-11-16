@@ -12,6 +12,7 @@ from torch.nn.utils import spectral_norm as sn
 class discriminator(nn.Module):
     def __init__(self, no_frame_samples, batch_size, input_window_size, device):
         super(discriminator, self).__init__()
+        self.noise_variance = 0.1
         self.device = device
         self.no_frame_samples = no_frame_samples
         self.batch_size = batch_size
@@ -84,8 +85,7 @@ class discriminator(nn.Module):
         meta_central_points = torch.cat([meta_input_h3.float(), meta_output_h3.float()], dim=1)
         noise_var = torch.cat([noise_var_in, noise_var_out], dim=1)
         meta_step = torch.cat([meta_input_h2.float(), meta_output_h2.float()], dim=1)
-        noise_variance = 0.1
-        x = disc_data[shuffle_idx] + torch.nan_to_num(noise_variance * torch.rand_like(disc_data[shuffle_idx]),nan=0.0)
+        x = disc_data[shuffle_idx] + torch.nan_to_num(self.noise_variance * torch.rand_like(disc_data[shuffle_idx]),nan=0.0)
         space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
 
         # B, C, H, W = disc_data.shape

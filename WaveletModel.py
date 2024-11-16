@@ -27,22 +27,22 @@ class WaveletModel(nn.Module):
         base_imag = torch.sin(2 * torch.pi * f * t)
         real_part = (
                 base_real*self.poly_mod[i,0]
-                - (t ** self.frac_order[i,0]*2) / (sigma ** self.frac_order[i,0]*2) * base_real*self.poly_mod[i,1]
-                + (t ** self.frac_order[i,1]*3) / (sigma ** self.frac_order[i,1]*3) * base_real*self.poly_mod[i,2]
-                - (t ** self.frac_order[i,2]*4) / (sigma ** self.frac_order[i,2]*4) * base_real*self.poly_mod[i,3]
-                + (t ** self.frac_order[i,3]*5) / (sigma ** self.frac_order[i,3]*5) * base_real*self.poly_mod[i,4]
-                - (t ** self.frac_order[i,4]*6) / (sigma ** self.frac_order[i,4]*6) * base_real*self.poly_mod[i,5]
-                + (t ** self.frac_order[i,5]*7) / (sigma ** self.frac_order[i,5]*7) * base_real*self.poly_mod[i,6]
+                - (t ** self.frac_order[i,0])*2 / (sigma ** self.frac_order[i,0])*2 * base_real*self.poly_mod[i,1]
+                + (t ** self.frac_order[i,1])*3 / (sigma ** self.frac_order[i,1])*3 * base_real*self.poly_mod[i,2]
+                - (t ** self.frac_order[i,2])*4 / (sigma ** self.frac_order[i,2])*4 * base_real*self.poly_mod[i,3]
+                + (t ** self.frac_order[i,3])*5 / (sigma ** self.frac_order[i,3])*5 * base_real*self.poly_mod[i,4]
+                - (t ** self.frac_order[i,4])*6 / (sigma ** self.frac_order[i,4])*6 * base_real*self.poly_mod[i,5]
+                + (t ** self.frac_order[i,5])*7 / (sigma ** self.frac_order[i,5])*7 * base_real*self.poly_mod[i,6]
         )
 
         imag_part = (
                 base_imag*self.poly_mod[i,7]
-                - (t ** self.frac_order[i,6]*2) / (sigma ** self.frac_order[i,6]*2) * base_imag*self.poly_mod[i,8]
-                + (t ** self.frac_order[i,7]*3) / (sigma ** self.frac_order[i,7]*3) * base_imag*self.poly_mod[i,9]
-                - (t ** self.frac_order[i,8]*4) / (sigma ** self.frac_order[i,8]*4) * base_imag*self.poly_mod[i,10]
-                + (t ** self.frac_order[i,9]*5) / (sigma ** self.frac_order[i,9]*5) * base_imag*self.poly_mod[i,11]
-                - (t ** self.frac_order[i,10]*6) / (sigma ** self.frac_order[i,10]*6) * base_imag*self.poly_mod[i,12]
-                + (t ** self.frac_order[i,11]*7) / (sigma ** self.frac_order[i,11]*7) * base_imag*self.poly_mod[i,13]
+                - (t ** self.frac_order[i,6])*2 / (sigma ** self.frac_order[i,6])*2 * base_imag*self.poly_mod[i,8]
+                + (t ** self.frac_order[i,7])*3 / (sigma ** self.frac_order[i,7])*3 * base_imag*self.poly_mod[i,9]
+                - (t ** self.frac_order[i,8])*4 / (sigma ** self.frac_order[i,8])*4 * base_imag*self.poly_mod[i,10]
+                + (t ** self.frac_order[i,9])*5 / (sigma ** self.frac_order[i,9]*5) * base_imag*self.poly_mod[i,11]
+                - (t ** self.frac_order[i,10])*6 / (sigma ** self.frac_order[i,10])*6 * base_imag*self.poly_mod[i,12]
+                + (t ** self.frac_order[i,11])*7 / (sigma ** self.frac_order[i,11])*7 * base_imag*self.poly_mod[i,13]
         )
 
         exp_dec_2 = torch.exp(-t ** 2 / (2 * sigma ** 2))
@@ -52,7 +52,7 @@ class WaveletModel(nn.Module):
         imag_wavelet = imag_part * gauss_window
 
         amp = real_wavelet + imag_wavelet
-        scaled_amp = amp / 3.0
+        scaled_amp = amp / torch.norm(amp)#3.0
         phase = torch.atan2(imag_wavelet, real_wavelet)
         sin_component = scaled_amp * torch.sin(phase)*self.phase_mod[i,0]
         cos_component = scaled_amp * torch.cos(phase)*self.phase_mod[i,1]

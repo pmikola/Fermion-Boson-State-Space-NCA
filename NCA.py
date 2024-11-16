@@ -134,7 +134,7 @@ class NCA(nn.Module):
                     f_k = fermion_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
                                                             k_size.int(), k_size.int())
                     f_kernels.append(f_k)
-                    freq_loss[k_idx,i] = self.fft_high_frequency_loss(f_k,hf_data)
+                    freq_loss[k_idx,i] = self.fft_high_frequency_loss(f_k,hf_data) / f_k.numel()
                     k_idx +=1
                     l_idx = h_idx
 
@@ -147,7 +147,7 @@ class NCA(nn.Module):
                     b_k = boson_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
                                                           k_size.int(), k_size.int())
                     b_kernels.append(b_k)
-                    freq_loss[k_idx, i] += self.fft_high_frequency_loss(b_k,hf_data)
+                    freq_loss[k_idx, i] += self.fft_high_frequency_loss(b_k,hf_data) / b_k.numel()
                     k_idx += 1
                     l_idx = h_idx
 
@@ -186,12 +186,12 @@ class NCA(nn.Module):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
 
-    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.5):
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
         fft_k_shifted = torch.fft.fftshift(fft_k)
         mask_lf = torch.zeros((C, HDC, H, W, D), device=self.device)
-        center_ch,center_hdc,center_x, center_y, center_z = (C+1)//2, (HDC+1)// 2, (H+1) // 2, (W +1)// 2,( D +1)// 2
+        center_ch,center_hdc,center_x, center_y, center_z = (C-1)//2, (HDC-1)// 2, (H-1) // 2, (W -1)// 2,( D -1)// 2
         cutoff_ch = int(cutoff_ratio * center_ch)
         cutoff_hdc = int(cutoff_ratio * center_hdc)
         cutoff_x = int(cutoff_ratio * center_x)
@@ -200,9 +200,10 @@ class NCA(nn.Module):
         mask_lf[center_ch - cutoff_ch:center_ch + cutoff_ch,center_hdc - cutoff_hdc:center_hdc + cutoff_hdc,center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y,center_z - cutoff_z:center_z + cutoff_z] = 1.
         high_freq_k = fft_k_shifted * ( 1- mask_lf)
         low_freq_k = fft_k_shifted * mask_lf
-        hf_mean = torch.abs(high_freq_k.mean())
-        lf_mean = torch.abs(low_freq_k.mean())
-        loss = (hf_mean / (lf_mean+hf_data))
+        hf_mean = torch.abs(high_freq_k).mean()
+        lf_mean = torch.abs(low_freq_k).mean()
+        # loss = (hf_mean / (1+lf_mean+hf_data))
+        loss = (hf_mean - hf_data) ** 2 + torch.relu(3 * lf_mean - hf_mean)
         return loss
 
     def validate_channel_orthogonality(self,particles):

@@ -58,7 +58,7 @@ criterion_disc = nn.BCELoss(reduction='mean')
 # optimizer = torchopt.Adam(t.model.parameters(), lr=5e-3) # High level api
 # optim = torchopt.Optimizer(net.parameters(), torchopt.adam(lr=learning_rate)) # low level api
 # optimizer = torch.optim.SGD(t.model.parameters(), lr=5e-3, momentum=0.1, weight_decay=1e-4)
-optimizer = torch.optim.Adam(t.model.parameters(), lr=2e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
+optimizer = torch.optim.Adam(t.model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4, amsgrad=True)
 
 # torch.autograd.set_detect_anomaly(True)
 # Note: Eon > Era > Period > Epoch
@@ -77,5 +77,5 @@ for period in range(1, no_periods + 1):
                      num_epochs=500)
     # t.fsim.simulate(simulate=0,delete_data=1)
 
-# t.visualize_lerning(5)
+t.visualize_lerning(5)
 t.examine(criterion, device, plot=1)

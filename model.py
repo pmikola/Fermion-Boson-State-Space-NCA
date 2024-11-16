@@ -1,5 +1,6 @@
 import math
 import time
+import torch.nn.functional as f
 
 import torch
 import torch.nn as nn
@@ -121,6 +122,8 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
     def forward(self, din,spiking_probabilities=None):
         #torch.cuda.synchronize()
         #t_start = time.perf_counter()
+        #spiking_probabilities = F.normalize(spiking_probabilities, p=1, dim=0)
+
         old_batch_size = self.batch_size
         (data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
          meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
@@ -189,11 +192,13 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         # print("model internal time patch : ", ((t_stop - t_start) * 1e3) / self.batch_size, "[ms]")
         # time.sleep(10000)
         if self.training:
-            hf_loss =self.fft_high_frequency_loss(self.r_h.weight,hf_data)
-            hf_loss +=self.fft_high_frequency_loss(self.g_h.weight,hf_data)
-            hf_loss +=self.fft_high_frequency_loss(self.b_h.weight,hf_data)
-            hf_loss +=self.fft_high_frequency_loss(self.a_h.weight,hf_data)
-            hf_loss +=self.fft_high_frequency_loss(self.s_h.weight,hf_data)
+            # hf_loss =self.fft_high_frequency_loss(self.r_h.weight,hf_data)
+            # hf_loss +=self.fft_high_frequency_loss(self.g_h.weight,hf_data)
+            # hf_loss +=self.fft_high_frequency_loss(self.b_h.weight,hf_data)
+            # hf_loss +=self.fft_high_frequency_loss(self.a_h.weight,hf_data)
+            # hf_loss +=self.fft_high_frequency_loss(self.s_h.weight,hf_data)
+            hf_loss = sum(self.fft_high_frequency_loss(layer.weight, hf_data) / layer.weight.numel() for layer in
+                          [self.r_h, self.g_h, self.b_h, self.a_h, self.s_h])
 
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.r]), dim=0)
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.g]), dim=0)
@@ -201,22 +206,22 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.a]), dim=0)
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.s]), dim=0)
 
-            hf_loss += self.fft_high_frequency_loss(self.rgbas.weight,hf_data)
-            hf_loss += self.fft_high_frequency_loss(self.downlift_data.weight,hf_data)
-            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_out.weight,hf_data)
-            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_in.weight,hf_data)
-            hf_loss += self.fft_high_frequency_loss( self.uplift_data.weight,hf_data)
+            hf_loss += self.fft_high_frequency_loss(self.rgbas.weight,hf_data) / self.rgbas.weight.numel()
+            hf_loss += self.fft_high_frequency_loss(self.downlift_data.weight,hf_data) / self.downlift_data.weight.numel()
+            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_out.weight,hf_data) / self.cross_correlate_out.weight.numel()
+            hf_loss += self.fft_high_frequency_loss(self.cross_correlate_in.weight,hf_data) / self.cross_correlate_in.weight.numel()
+            hf_loss += self.fft_high_frequency_loss( self.uplift_data.weight,hf_data) / self.uplift_data.weight.numel()
 
             freq_loss += hf_loss
         self.batch_size = old_batch_size
         return r, g, b, a, s, deepS,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss,self.loss_weights
 
-    def high_frequency_extraction(self,data, cutoff_ratio=0.5):
+    def high_frequency_extraction(self,data, cutoff_ratio=0.7):
         C, H, W, D = data.shape
         mask_lf = torch.zeros((C, H, W, D), device=self.device)
         fft_d = torch.fft.fftn(data)
         fft_d_shifted = torch.fft.fftshift(fft_d)
-        center_ch, center_x, center_y, center_z = (C + 1) // 2, (H + 1) // 2, (W + 1) // 2, (D + 1) // 2
+        center_ch, center_x, center_y, center_z = (C - 1) // 2, (H - 1) // 2, (W - 1) // 2, (D - 1) // 2
         cutoff_ch = int(cutoff_ratio * center_ch)
         cutoff_x = int(cutoff_ratio * center_x)
         cutoff_y = int(cutoff_ratio * center_y)
@@ -226,16 +231,16 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         center_y - cutoff_y:center_y + cutoff_y,
         center_z - cutoff_z:center_z + cutoff_z] = 1.
         high_freq_k = fft_d_shifted * (1 - mask_lf)
-        hf_mean = torch.abs(high_freq_k.mean())
+        hf_mean = torch.abs(high_freq_k).mean()
         return hf_mean
 
-    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.5):
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
         if len(kernels.shape) == 4:
             C,H, W, D = kernels.shape
             mask_lf = torch.zeros((C, H, W, D), device=self.device)
             fft_k = torch.fft.fftn(kernels)
             fft_k_shifted = torch.fft.fftshift(fft_k)
-            center_ch,center_x, center_y, center_z = (C+1)//2, (H+1) // 2, (W +1)// 2,( D +1)// 2
+            center_ch,center_x, center_y, center_z = (C-1)//2, (H-1) // 2, (W -1)// 2,( D -1)// 2
             cutoff_ch = int(cutoff_ratio * center_ch)
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
@@ -249,7 +254,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             mask_lf = torch.zeros((C, HDC, H, W, D), device=self.device)
             fft_k = torch.fft.fftn(kernels)
             fft_k_shifted = torch.fft.fftshift(fft_k)
-            center_ch,center_hdc,center_x, center_y, center_z = (C+1)//2, (HDC+1)// 2, (H+1) // 2, (W +1)// 2,( D +1)// 2
+            center_ch,center_hdc,center_x, center_y, center_z = (C-1)//2, (HDC-1)// 2, (H-1) // 2, (W -1)// 2,( D -1)// 2
             cutoff_ch = int(cutoff_ratio * center_ch)
             cutoff_hdc = int(cutoff_ratio * center_hdc)
             cutoff_x = int(cutoff_ratio * center_x)
@@ -262,9 +267,10 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             center_z - cutoff_z:center_z + cutoff_z] = 1.
         high_freq_k = fft_k_shifted * (1 - mask_lf)
         low_freq_k = fft_k_shifted * mask_lf
-        hf_mean = torch.abs(high_freq_k.mean())
-        lf_mean = torch.abs(low_freq_k.mean())
-        loss = (hf_mean / (lf_mean+hf_data))
+        hf_mean = torch.abs(high_freq_k).mean()
+        lf_mean = torch.abs(low_freq_k).mean()
+        # loss = (hf_mean / (1+lf_mean+hf_data))
+        loss = (hf_mean - hf_data) ** 2 + torch.relu(3 * lf_mean - hf_mean)
         return loss
 
     @staticmethod

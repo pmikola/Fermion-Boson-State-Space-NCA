@@ -1070,6 +1070,7 @@ class teacher(nn.Module):
             grad_counter = 0
             reiterate_data = 1
             reiterate_counter = 0
+            discriminator_learning = True
             norm = 'forward'
             print_every_nth_frame = 10
             best_models = []
@@ -1110,15 +1111,20 @@ class teacher(nn.Module):
 
                 if epoch == 0:
                     self.disc_loss = [torch.tensor([0.5], device=self.device)]  # Ensure it's initialized
+                if discriminator_learning:
+                    if self.disc_loss[-1] < 0.25:
+                        discriminator_learning = False
+                        self.discriminator.noise_variance = self.discriminator.noise_variance*1.1
+                if discriminator_learning:
+                    self.discriminator.noise_variance = 0.1
 
-                if epoch % 2 == 0:
-                    disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
-                                                        self.structure_output,
-                                                        criterion_disc)
+                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
+                                                    self.structure_output,
+                                                    criterion_disc)
+                disc_optimizer.zero_grad(set_to_none=True)
+                disc_loss.backward()
+                disc_optimizer.step()
 
-                    disc_optimizer.zero_grad(set_to_none=True)
-                    disc_loss.backward()
-                    disc_optimizer.step()
 
                 if epoch > 0:
                     self.disc_loss.append(disc_loss.detach())
@@ -1138,8 +1144,9 @@ class teacher(nn.Module):
                                                          self.structure_output_val, criterion_model, norm)
 
                 self.train_loss.append(loss.item())
-
                 self.val_loss.append(val_loss.item())
+                if self.train_loss[-1] < min(self.train_loss):
+                    discriminator_learning = True
 
                 cpu_temp = WinTmp.CPU_Temp()
                 gpu_temp = WinTmp.GPU_Temp()
@@ -1184,7 +1191,7 @@ class teacher(nn.Module):
                     if grad_counter == 20 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = param_group['lr'] * 0.9995
-                            if param_group['lr'] < 2e-4: #or reiterate_data == 0:
+                            if param_group['lr'] < 2e-5: #or reiterate_data == 0:
                                 param_group['lr'] = 2e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
@@ -1545,17 +1552,17 @@ class teacher(nn.Module):
         loss_min = self.loss_coeffs.min()
         loss_range = self.loss_coeffs.max() - loss_min + 1e-12
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
-        temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
+        temperature = 0.1 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
-        disc_loss = -torch.log(self.disc_loss[-1])*1e1 + 1e-8
+        disc_loss = -torch.log(self.disc_loss[-1])*2e1 + 1e-8
 
         # lw_min = lw.min()
         # lw_range = lw.max() - loss_min + 1e-12
         # normalized_lw_coeffs = (lw - lw_min) / lw_range
         # temperature = 30.# + 0.5 * normalized_lw_coeffs.std().item()
         # lw = f.softmax((normalized_lw_coeffs.max() - normalized_lw_coeffs) / temperature, dim=0)
-        final_loss = disc_loss+entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*2e-6+b_loss*1e-3+hf_e_loss-freq_loss.mean()*1e-3
-#        print(lw[0]*disc_loss.item(),lw[1]*entropy_loss.item()*5e1,lw[2]*grad_penalty.item()*2e-1,lw[3]*kl_loss.item()*1e-3,lw[4]*sink_loss.item()*8e-1,lw[5]*torch.mean(diff_fft_loss).item()*1e4,lw[6]*critical_loss.item()*5,lw[7]*torch.mean(diff_loss).item()*3e1,lw[8]*torch.mean(fft_loss).item()*2e4,lw[9]*2e1*torch.mean(value_loss).item(),lw[11]*ortho_mean.item()*1e-4,lw[12]*log_det_jacobian_loss.mean().item()*2e-5,lw[13]*b_loss.item()*1e-3,lw[14]*hf_e_loss.item(),-lw[15]*freq_loss.mean().item()*3e-3)
+        final_loss = disc_loss+entropy_loss*1e1+grad_penalty*2e-2+kl_loss*5e-4+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e3+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-3+hf_e_loss*5e-1+freq_loss.mean()*1e-3
+        #print(disc_loss.item(),entropy_loss.item()*5e1,grad_penalty.item()*2e-1,kl_loss.item()*1e-3,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e4,critical_loss.item()*5,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*2e-5,b_loss.item()*1e-3,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
         return final_loss*1e-1
 
     def boundary_loss(self,pred, target):
@@ -1574,15 +1581,19 @@ class teacher(nn.Module):
 
     def fft_high_frequency_loss(self, pred, target, cutoff_ratio=0.8):
         B, H, W = pred.shape
-        fft_pred = torch.fft.rfft2(pred, dim=(-2, -1))
-        fft_target = torch.fft.rfft2(target, dim=(-2, -1))
-        mask = torch.ones((B, H, W // 2 + 1), device=self.device)
-        center_x = H // 2
+        fft_pred = torch.fft.fft2(pred, dim=(-2, -1))
+        fft_target = torch.fft.fft2(target, dim=(-2, -1))
+        fft_shifted_pred = torch.fft.fftshift(fft_pred, dim=(-2, -1))
+        fft_shifted_target = torch.fft.fftshift(fft_target, dim=(-2, -1))
+        mask = torch.ones((B, H, W ), device=self.device)
+        center_x = (H-1) // 2
+        center_y = (W-1) // 2
         cutoff_x = int(cutoff_ratio * center_x)
-        mask[:, center_x - cutoff_x:center_x + cutoff_x, :] = 0.0
-        high_freq_pred = fft_pred * mask
-        high_freq_target = fft_target * mask
-        diff = torch.abs(high_freq_pred - high_freq_target)
+        cutoff_y = int(cutoff_ratio * center_y)
+        mask[:, center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 0.0
+        high_freq_pred = fft_shifted_pred * mask
+        high_freq_target = fft_shifted_target * mask
+        diff = torch.abs(high_freq_pred.real - high_freq_target.real)**2
         loss = torch.mean(diff)
         return loss
 
@@ -1593,41 +1604,42 @@ class teacher(nn.Module):
         else:
             noise = torch.rand_like(noise, device=self.device)
             H, W = noise.shape
-            fft_noise = torch.fft.rfft2(noise, dim=(-2, -1))
+            fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
             fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
             mask = torch.ones_like(fft_noise_shifted, device=self.device)
-            center_x, center_y = H // 2, (W // 2 + 1) // 2
+            center_x, center_y = (H-1) // 2, (W-1) // 2
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
             mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
             fft_noise = fft_noise * mask
             fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
-            noise = torch.fft.irfft2(fft_noise_shifted, s=(H, W), dim=(-2, -1))
+            noise = torch.fft.ifft2(fft_noise_shifted, s=(H, W), dim=(-2, -1)).real
         return noise
 
     def fft_data(self, data):
-        cutoff_ratio = torch.rand((1,)).to(self.device)
-        if cutoff_ratio < 0.5:
-            pass
+        augment_flag = torch.rand((1,)).to(self.device)
+        if augment_flag < 0.5:
+            return data
         else:
+            hf_flag = torch.rand((1,))
             H, W = data.shape
-            fft_data = torch.fft.rfft2(data, dim=(-2, -1))
-            fft_data = torch.fft.fftshift(fft_data, dim=(-2, -1))
-            mask = torch.zeros((H, W // 2 + 1), device=self.device)
-            center_x, center_y = H // 2, (W // 2 + 1) // 2
+            fft_data = torch.fft.fft2(data, dim=(-2, -1))
+            fft_data_shifted = torch.fft.fftshift(fft_data, dim=(-2, -1))
+            mask = torch.zeros((H, W ), device=self.device)
+            center_x, center_y = (H-1) // 2, (W-1) // 2
+            epoch_fraction = (1+self.epoch) / (1+self.num_of_epochs)
+            cutoff_ratio = 0.05 + 0.9 * epoch_fraction
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
-            if self.epoch < self.num_of_epochs*0.3:
+            if hf_flag < cutoff_ratio:
                 mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 1
-                high_freq_pred = fft_data * mask
-            if self.num_of_epochs*0.3 <= self.epoch <= self.num_of_epochs*0.6:
-                high_freq_pred = fft_data
+                high_freq_pred = fft_data_shifted * (1 - mask)
             else:
                 mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 1
-                high_freq_pred = fft_data * (1-mask)
+                high_freq_pred = fft_data * mask
             high_freq_pred_shifted = torch.fft.ifftshift(high_freq_pred, dim=(-2, -1))
-            data = torch.fft.irfft2(high_freq_pred_shifted, s=(H, W), dim=(-2, -1))
-        return data
+            data = torch.fft.ifft2(high_freq_pred_shifted, s=(H, W), dim=(-2, -1)).real
+            return data
 
     def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
 
