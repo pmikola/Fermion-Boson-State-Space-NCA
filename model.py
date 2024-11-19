@@ -266,11 +266,11 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             center_y - cutoff_y:center_y + cutoff_y,
             center_z - cutoff_z:center_z + cutoff_z] = 1.
         high_freq_k = fft_k_shifted * (1 - mask_lf)
-        low_freq_k = fft_k_shifted * mask_lf
+        low_freq_k = fft_k_shifted * mask_lf                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
         hf_mean = torch.abs(high_freq_k).mean()
         lf_mean = torch.abs(low_freq_k).mean()
         # loss = (hf_mean / (1+lf_mean+hf_data))
-        loss = (hf_mean - hf_data) ** 2 + torch.relu(3 * lf_mean - hf_mean)
+        loss = torch.abs(hf_mean - hf_data) ** 2 + torch.abs(lf_mean - hf_mean)**2
         return loss
 
     @staticmethod

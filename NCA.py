@@ -203,7 +203,7 @@ class NCA(nn.Module):
         hf_mean = torch.abs(high_freq_k).mean()
         lf_mean = torch.abs(low_freq_k).mean()
         # loss = (hf_mean / (1+lf_mean+hf_data))
-        loss = (hf_mean - hf_data) ** 2 + torch.relu(3 * lf_mean - hf_mean)
+        loss = torch.abs(hf_mean - hf_data) ** 2 + torch.abs(lf_mean - hf_mean)** 2
         return loss
 
     def validate_channel_orthogonality(self,particles):
