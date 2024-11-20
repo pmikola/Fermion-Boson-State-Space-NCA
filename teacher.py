@@ -20,13 +20,13 @@ from matplotlib import pyplot as plt, animation
 from torch.autograd import grad
 import torch.nn.utils as nn_utils
 import torch.nn.functional as f
+from torchvision.transforms.v2.functional import adjust_hue_image
 
 from VSI_Metric import VS_ESSIM
 
 
 class teacher(nn.Module):
     def __init__(self, model,discriminator, device):
-        # TODO: NOT MACIEK
         super(teacher, self).__init__()
         #self.t = None
         self.validation_dataset = None
@@ -1663,14 +1663,42 @@ class teacher(nn.Module):
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
         disc_loss = -torch.log(self.disc_loss[-1])*2e1 + 1e-8
 
+        if self.epoch == 5:
+            ls = [vsi_loss ,entropy_loss   , kl_loss  , sink_loss  , diff_fft_loss  , critical_loss  , diff_loss  , fft_loss  ,  value_loss , ortho_mean  , log_det_jacobian_loss.mean()  , b_loss  , hf_e_loss  , freq_loss.mean()]
+            adjusted_coeffs = [1 / loss if loss != 0 else 0 for loss in ls]
+            A, B, C, D, E, F, G, H, I, J, K, L, M,N = adjusted_coeffs
+            model.A, model.B, model.C, model.D, model.E, model.F, model.G, model.H, model.I, model.J, model.K, model.L, model.M,model.N = A.detach(), B.detach(), C.detach(), D.detach(), E.detach(), F.detach(), G.detach(), H.detach(), I.detach(), J.detach(), K.detach(),L.detach(), M.detach(),N.detach()
+            #scaled_losses = [coeff * loss for coeff, loss in zip(adjusted_coeffs, ls)]
         # lw_min = lw.min()
         # lw_range = lw.max() - loss_min + 1e-12
         # normalized_lw_coeffs = (lw - lw_min) / lw_range
         # temperature = 30.# + 0.5 * normalized_lw_coeffs.std().item()
         # lw = f.softmax((normalized_lw_coeffs.max() - normalized_lw_coeffs) / temperature, dim=0)
-        final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
-        # print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return final_loss*1e-1,vsi_loss, entropy_loss, grad_penalty, kl_loss, sink_loss, critical_loss, hf_e_loss, b_loss,value_loss,diff_fft_loss,fft_loss,diff_loss,log_det_jacobian_loss.mean(),freq_loss.mean()
+        #final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
+        final_loss = torch.cat([vsi_loss.mean().unsqueeze(0) * model.A.unsqueeze(0) , disc_loss.mean().unsqueeze(0)*2 ,
+                                entropy_loss.mean().unsqueeze(0) * model.B.unsqueeze(0) , grad_penalty.mean().unsqueeze(0) * 2e-2 ,
+                                kl_loss.mean().unsqueeze(0) * model.C.unsqueeze(0) , sink_loss.mean().unsqueeze(0) * model.D.unsqueeze(0) ,
+                                diff_fft_loss.mean().unsqueeze(0) * model.E.unsqueeze(0) , critical_loss.mean().unsqueeze(0) * model.F.unsqueeze(0) ,
+                                diff_loss.mean().unsqueeze(0) * model.G.unsqueeze(0) , fft_loss.mean().unsqueeze(0) * model.H.unsqueeze(0) ,
+                                model.I.unsqueeze(0) * value_loss.mean().unsqueeze(0) , ortho_mean.mean().unsqueeze(0) * model.J.unsqueeze(0) ,
+                                log_det_jacobian_loss.mean().unsqueeze(0) * model.K.unsqueeze(0) , b_loss.mean().unsqueeze(0) * model.L.unsqueeze(0) ,
+                                hf_e_loss.mean().unsqueeze(0) * model.M.unsqueeze(0) , freq_loss.mean().unsqueeze(0) * model.N.unsqueeze(0)],dim=0)
+
+        #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
+        return (torch.mean(final_loss),
+                vsi_loss* model.A,
+                entropy_loss* model.B, grad_penalty* 2e-2 ,
+                kl_loss* model.C,
+                sink_loss* model.D,
+                critical_loss* model.F,
+                hf_e_loss* model.M,
+                b_loss* model.L,
+                value_loss* model.I,
+                diff_fft_loss* model.E,
+                fft_loss* model.H,
+                diff_loss* model.G,
+                log_det_jacobian_loss.mean()* model.K,
+                freq_loss.mean()* model.N)
 
 
     def boundary_loss(self,pred, target):
