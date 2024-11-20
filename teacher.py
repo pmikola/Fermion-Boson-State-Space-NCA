@@ -1685,7 +1685,7 @@ class teacher(nn.Module):
                                 hf_e_loss.mean().unsqueeze(0) * model.M.unsqueeze(0) , freq_loss.mean().unsqueeze(0) * model.N.unsqueeze(0)],dim=0)
 
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return (torch.mean(final_loss),
+        return (torch.sum(final_loss),
                 vsi_loss* model.A,
                 entropy_loss* model.B, grad_penalty* 2e-2 ,
                 kl_loss* model.C,
