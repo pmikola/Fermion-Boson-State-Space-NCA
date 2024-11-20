@@ -21,6 +21,9 @@ from torch.autograd import grad
 import torch.nn.utils as nn_utils
 import torch.nn.functional as f
 
+from VSI_Metric import VS_ESSIM
+
+
 class teacher(nn.Module):
     def __init__(self, model,discriminator, device):
         # TODO: NOT MACIEK
@@ -40,7 +43,7 @@ class teacher(nn.Module):
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
        # self.ssim_loss = SSIM(data_range=1., channel=5,nonnegative_ssim=True,K=(0.01, 0.1),win_size=7).to(self.device)
-        self.vsi_loss = VSILoss(reduction='mean').to(self.device)
+        self.vsi = VS_ESSIM().to(self.device)
         self.sinkhorn_loss = SamplesLoss("sinkhorn", p=2, blur=0.05, scaling=0.9)
 
         self.data_input = None
@@ -86,6 +89,34 @@ class teacher(nn.Module):
         self.train_loss = []
         self.disc_loss = []
         self.val_loss = []
+        self.vsi_loss = []
+        self.entropy_loss = []
+        self.grad_penalty = []
+        self.kl_loss = []
+        self.sink_loss = []
+        self.critical_loss = []
+        self.hf_e_loss = []
+        self.b_loss = []
+        self.value_loss = []
+        self.diff_fft_loss = []
+        self.fft_loss = []
+        self.diff_loss = []
+        self.log_det_jacobian_loss =[]
+        self.freq_loss = []
+        self.val_vsi_loss = []
+        self.val_entropy_loss = []
+        self.val_grad_penalty = []
+        self.val_kl_loss = []
+        self.val_sink_loss = []
+        self.val_critical_loss = []
+        self.val_hf_e_loss = []
+        self.val_b_loss = []
+        self.val_value_loss = []
+        self.val_diff_fft_loss = []
+        self.val_fft_loss = []
+        self.val_diff_loss = []
+        self.val_log_det_jacobian_loss = []
+        self.val_freq_loss = []
         self.cpu_temp = []
         self.gpu_temp = []
         self.h = None
@@ -1116,7 +1147,10 @@ class teacher(nn.Module):
                 #         self.discriminator.noise_variance = self.discriminator.noise_variance*1.1
                 # if discriminator_learning:
                 #     self.discriminator.noise_variance = 0.1
-                self.discriminator.noise_variance = 1 - ((1+self.epoch) / (1+self.num_of_epochs))
+                if self.epoch % 2 == 0:
+                    self.discriminator.noise_variance = 1 - ((1+self.epoch) / (1+self.num_of_epochs))
+                else:
+                    self.discriminator.noise_variance = torch.rand((1,)).to(self.device)
                 disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
                                                     self.structure_output,
                                                     criterion_disc)
@@ -1132,7 +1166,7 @@ class teacher(nn.Module):
                                              self.structure_input, self.structure_output, criterion_model, norm)
 
                 optimizer.zero_grad(set_to_none=True)
-                loss.backward()
+                loss[0].backward()
                 optimizer.step()
 
                 if self.validation_dataset is not None:
@@ -1142,8 +1176,38 @@ class teacher(nn.Module):
                                                          self.data_output_val, self.structure_input_val,
                                                          self.structure_output_val, criterion_model, norm)
 
-                self.train_loss.append(loss.item())
-                self.val_loss.append(val_loss.item())
+                self.train_loss.append(loss[0].item())
+                self.val_loss.append(val_loss[0].item())
+                self.vsi_loss.append(loss[1].item())
+                self.entropy_loss.append(loss[2].item())
+                self.grad_penalty.append(loss[3].item())
+                self.kl_loss.append(loss[4].item())
+                self.sink_loss.append(loss[5].item())
+                self.critical_loss.append(loss[6].item())
+                self.hf_e_loss.append(loss[7].item())
+                self.b_loss.append(loss[8].item())
+                self.value_loss.append(loss[9].item())
+                self.diff_fft_loss.append(loss[10].item())
+                self.fft_loss.append(loss[11].item())
+                self.diff_loss.append(loss[12].item())
+                self.log_det_jacobian_loss.append(loss[13].item())
+                self.freq_loss.append(loss[14].item())
+                self.val_vsi_loss.append(val_loss[1].item())
+                self.val_entropy_loss.append(val_loss[2].item())
+                self.val_grad_penalty.append(val_loss[3].item())
+                self.val_kl_loss.append(val_loss[4].item())
+                self.val_sink_loss.append(val_loss[5].item())
+                self.val_critical_loss.append(val_loss[6].item())
+                self.val_hf_e_loss.append(val_loss[7].item())
+                self.val_b_loss.append(val_loss[8].item())
+                self.val_value_loss.append(val_loss[9].item())
+                self.val_diff_fft_loss.append(val_loss[10].item())
+                self.val_fft_loss.append(val_loss[11].item())
+                self.val_diff_loss.append(val_loss[12].item())
+                self.val_log_det_jacobian_loss.append(val_loss[13].item())
+                self.val_freq_loss.append(val_loss[14].item())
+
+
                 # if self.train_loss[-1] < min(self.train_loss):
                     #discriminator_learning = True
 
@@ -1161,7 +1225,7 @@ class teacher(nn.Module):
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
                 if epoch > 25:
-                    if val_loss < min(self.val_loss[:-1]):
+                    if val_loss[0] < min(self.val_loss[:-1]):
                         model_to_Save = self.model
                         print('saved_checkpoint')
 
@@ -1212,8 +1276,8 @@ class teacher(nn.Module):
 
                     print(
                         f'P: {self.period}/{self.no_of_periods} | E: {((t_epoch_total - t_epoch_current) / (print_every_nth_frame * 60)):.2f} [min], '
-                        f'vL: {val_loss.item():.6f}, '
-                        f'mL: {loss.item():.6f}, '
+                        f'vL: {val_loss[0].item():.6f}, '
+                        f'mL: {loss[0].item():.6f}, '
                         f'dL: {disc_loss.item():.6f}, '
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
                         f'CPU TEMP: {cpu_temp} [°C], '
@@ -1237,23 +1301,50 @@ class teacher(nn.Module):
         plt.plot(self.train_loss, color='blue',label='train')
         plt.plot(self.val_loss, color='orange',label='test')
         plt.plot(np.array(torch.tensor(self.disc_loss).cpu()), color='red', label='disc')
-
+        plt.plot(self.vsi_loss,label='vsi_loss')
+        plt.plot(self.entropy_loss,label='entropy_loss')
+        plt.plot(self.grad_penalty,label='grad_penalty')
+        plt.plot(self.kl_loss,label='kl_loss')
+        plt.plot(self.sink_loss,label='sink_loss')
+        plt.plot(self.critical_loss,label='critical_loss')
+        plt.plot(self.hf_e_loss,label='hf_e_loss')
+        plt.plot(self.b_loss,label='b_loss')
+        plt.plot(self.value_loss,label='value_loss')
+        plt.plot(self.diff_fft_loss,label='diff_fft_loss')
+        plt.plot(self.fft_loss,label='fft_loss')
+        plt.plot(self.diff_loss,label='diff_loss')
+        plt.plot(self.log_det_jacobian_loss,label='log_det_jacobian_loss')
+        plt.plot(self.freq_loss,label='freq_loss')
+        plt.plot(self.val_vsi_loss,label='val_vsi_loss',linestyle='--')
+        plt.plot(self.val_entropy_loss,label='val_entropy_loss',linestyle='--')
+        plt.plot(self.val_grad_penalty,label='val_grad_penalty',linestyle='--')
+        plt.plot(self.val_kl_loss,label='val_kl_loss',linestyle='--')
+        plt.plot(self.val_sink_loss,label='val_sink_loss',linestyle='--')
+        plt.plot(self.val_critical_loss,label='val_critical_loss',linestyle='--')
+        plt.plot(self.val_hf_e_loss,label='val_hf_e_loss',linestyle='--')
+        plt.plot(self.val_b_loss,label='val_b_loss',linestyle='--')
+        plt.plot(self.val_value_loss,label='val_value_loss',linestyle='--')
+        plt.plot(self.val_diff_fft_loss,label='val_diff_fft_loss',linestyle='--')
+        plt.plot(self.val_fft_loss,label='val_fft_loss',linestyle='--')
+        plt.plot(self.val_diff_loss,label='val_diff_loss',linestyle='--')
+        plt.plot(self.val_log_det_jacobian_loss, label='val_log_det_jacobian_loss',linestyle='--')
+        plt.plot(self.val_freq_loss, label='val_freq_loss',linestyle='--')
         plt.plot(self.cpu_temp,label='cpu_temp')
         plt.plot(self.gpu_temp,label='gpu_temp')
 
-        avg_train_loss = sum(self.train_loss) / len(self.train_loss)
-        avg_val_loss = sum(self.val_loss) / len(self.val_loss)
-        epochs = np.arange(len(self.train_loss))
-        train_poly_fit = np.poly1d(np.polyfit(epochs, self.train_loss, poly_degree))
-        val_poly_fit = np.poly1d(np.polyfit(epochs, self.val_loss, poly_degree))
-        plt.plot(epochs, train_poly_fit(epochs), color='blue', linestyle='--',
-                 label=f'Train: deg: {poly_degree} | Avg: {avg_train_loss:.3f}')
-        plt.plot(epochs, val_poly_fit(epochs), color='orange', linestyle='--',
-                 label=f'Val: deg: {poly_degree} | Avg: {avg_val_loss:.3f}')
+        # avg_train_loss = sum(self.train_loss) / len(self.train_loss)
+        # avg_val_loss = sum(self.val_loss) / len(self.val_loss)
+        # epochs = np.arange(len(self.train_loss))
+        # train_poly_fit = np.poly1d(np.polyfit(epochs, self.train_loss, poly_degree))
+        # val_poly_fit = np.poly1d(np.polyfit(epochs, self.val_loss, poly_degree))
+        # plt.plot(epochs, train_poly_fit(epochs), color='blue', linestyle='--',
+        #          label=f'Train: deg: {poly_degree} | Avg: {avg_train_loss:.3f}')
+        # plt.plot(epochs, val_poly_fit(epochs), color='orange', linestyle='--',
+        #          label=f'Val: deg: {poly_degree} | Avg: {avg_val_loss:.3f}')
         plt.yscale("log")
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.legend()
+        plt.legend(bbox_to_anchor=(1.05, 1.0),loc='upper center')
         plt.grid(True)
         plt.show()
 
@@ -1371,7 +1462,7 @@ class teacher(nn.Module):
         b_loss = torch.mean(loss_diff_b, dim=[1, 2])
         a_loss = torch.mean(loss_diff_a, dim=[1, 2])
         s_loss = torch.mean(loss_diff_s, dim=[1, 2])
-        diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s, dim=[1, 2])
+        diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s)
         # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
 
         # Note: Fourier loss
@@ -1397,7 +1488,7 @@ class teacher(nn.Module):
         fft_loss_b = criterion(t * fft_out_pred_b + t_1 * fft_out_true_r, fft_out_true_b)
         fft_loss_a = criterion(t * fft_out_pred_a + t_1 * fft_out_true_r, fft_out_true_a)
         fft_loss_s = criterion(t * fft_out_pred_s + t_1 * fft_out_true_r, fft_out_true_s)
-        fft_loss = torch.mean(fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s, dim=[1, 2])
+        fft_loss = torch.mean(fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s)
         # fft_loss = fft_loss_r + fft_loss_g + fft_loss_b + fft_loss_a + fft_loss_s
         r_loss += torch.mean(fft_loss_r, dim=[1, 2])
         g_loss += torch.mean(fft_loss_g, dim=[1, 2])
@@ -1422,7 +1513,7 @@ class teacher(nn.Module):
         diff_fft_pred_s = fft_out_pred_s - fft_in_true_s
         diff_fft_loss_s = criterion(t * diff_fft_pred_s + t_1 * diff_fft_true_r, diff_fft_true_s)
         diff_fft_loss = torch.mean(
-            diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s, dim=[1, 2])
+            diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s)
         # diff_fft_loss = diff_fft_loss_r + diff_fft_loss_g + diff_fft_loss_b + diff_fft_loss_a + diff_fft_loss_s
 
         r_loss += torch.mean(diff_fft_loss_r, dim=[1, 2])
@@ -1437,9 +1528,8 @@ class teacher(nn.Module):
         loss_b = criterion(t * pred_b + t_1 * b_out, b_out)
         loss_alpha = criterion(t * pred_a + t_1 * a_out, a_out)
         loss_s = criterion(t * pred_s + t_1 * s_out, s_out)
-        value_loss = torch.mean(loss_r + loss_g + loss_b + loss_alpha + loss_s, dim=[1, 2])
+        value_loss = torch.mean(loss_r + loss_g + loss_b + loss_alpha + loss_s)
         #value_loss = loss_r + loss_g + loss_b + loss_alpha + loss_s
-
         r_loss += torch.mean(loss_r, dim=[1, 2])
         g_loss += torch.mean(loss_g, dim=[1, 2])
         b_loss += torch.mean(loss_b, dim=[1, 2])
@@ -1554,20 +1644,18 @@ class teacher(nn.Module):
         self.loss_coeffs[3] = a_loss.mean().item()
         self.loss_coeffs[4] = s_loss.mean().item()
 
-        # rgb_pred = torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)],dim=1)
-        # rgb_true = torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)],dim=1)
-        # rgb_pred = rgb_pred - rgb_pred.min()
-        # rgb_pred = rgb_pred / rgb_pred.max()
-        # rgb_true = rgb_true - rgb_true.min()
-        # rgb_true = rgb_true / rgb_true.max()
-        # rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
-        # rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
-        # t = t.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-        # t_1 = t_1.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-        # #print(t*rgb_pred.max(),t_1*rgb_true.max(),t*rgb_pred.min(),t_1*rgb_true.min(),rgb_true.min(),rgb_true.max())
-        # print(t.shape,rgb_pred.shape)
-        # vsi_loss = self.vsi_loss(t.unsqueeze(1).unsqueeze(2).unsqueeze(3)*rgb_pred+t_1.unsqueeze(1).unsqueeze(2).unsqueeze(3)*rgb_true,rgb_true)
-
+        rgb_pred = torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)],dim=1)
+        rgb_true = torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)],dim=1)
+        rgb_pred = rgb_pred - rgb_pred.min()
+        rgb_pred = rgb_pred / rgb_pred.max()
+        rgb_true = rgb_true - rgb_true.min()
+        rgb_true = rgb_true / rgb_true.max()
+        rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
+        rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
+        t = t.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        t_1 = t_1.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        #print(t*rgb_pred.max(),t_1*rgb_true.max(),t*rgb_pred.min(),t_1*rgb_true.min(),rgb_true.min(),rgb_true.max())
+        vsi_loss = self.vsi(t*rgb_pred+t_1*rgb_true,rgb_true)
         loss_min = self.loss_coeffs.min()
         loss_range = self.loss_coeffs.max() - loss_min + 1e-12
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
@@ -1580,9 +1668,10 @@ class teacher(nn.Module):
         # normalized_lw_coeffs = (lw - lw_min) / lw_range
         # temperature = 30.# + 0.5 * normalized_lw_coeffs.std().item()
         # lw = f.softmax((normalized_lw_coeffs.max() - normalized_lw_coeffs) / temperature, dim=0)
-        final_loss =disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+torch.mean(diff_fft_loss)*1e3+critical_loss*2e-1+torch.mean(diff_loss)*1e1+torch.mean(fft_loss)*2e4+2e1*torch.mean(value_loss)+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
+        final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
         # print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return final_loss*1e-1
+        return final_loss*1e-1,vsi_loss, entropy_loss, grad_penalty, kl_loss, sink_loss, critical_loss, hf_e_loss, b_loss,value_loss,diff_fft_loss,fft_loss,diff_loss,log_det_jacobian_loss.mean(),freq_loss.mean()
+
 
     def boundary_loss(self,pred, target):
         grad_pred_h = torch.abs(pred[:,  0:2, :] - pred[:,  -3:-1, :])
