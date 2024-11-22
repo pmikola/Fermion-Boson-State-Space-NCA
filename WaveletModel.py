@@ -11,11 +11,11 @@ class WaveletModel(nn.Module):
         self.height = height
         self.width = width
         self.scales = nn.Parameter(torch.linspace(min_scale_value, max_scale_value, num_scales)).to(self.device)
-        self.f_mod = nn.Parameter(torch.ones(num_steps)).to(self.device)
-        self.poly_mod = nn.Parameter(torch.ones(num_steps,14)).to(self.device)
-        self.exp_mod = nn.Parameter(torch.ones(num_steps, 1)).to(self.device)
-        self.frac_order = nn.Parameter(torch.ones(num_steps,12)).to(self.device)
-        self.phase_mod = nn.Parameter(torch.ones(num_steps, 3)).to(self.device)
+        self.f_mod = nn.Parameter(torch.ones(num_steps),requires_grad=True).to(self.device)
+        self.poly_mod = nn.Parameter(torch.ones(num_steps,14),requires_grad=True).to(self.device)
+        self.exp_mod = nn.Parameter(torch.ones(num_steps, 1),requires_grad=True).to(self.device)
+        self.frac_order = nn.Parameter(torch.ones(num_steps,12),requires_grad=True).to(self.device)
+        self.phase_mod = nn.Parameter(torch.ones(num_steps, 3),requires_grad=True).to(self.device)
     def forward(self, x,i):
         cwt_transformed = self.cwt(x,self.scales,i)
         return cwt_transformed

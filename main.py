@@ -48,7 +48,7 @@ else:
     discriminator = discriminator(no_frame_samples, batch_size, input_window_size, device).to(device)
     t = teacher(model, discriminator, device)
     disc_optimizer = torch.optim.Adam(t.discriminator.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08,
-                                  weight_decay=1e-5, amsgrad=True)
+                                  weight_decay=1e-6, amsgrad=True)
 
 t.seed_setter(2024)
 t.fsim = fl.flame_sim(no_frames=no_frames, frame_skip=frame_skip)
@@ -66,6 +66,8 @@ no_periods = 1
 t.no_of_periods = no_periods
 # model.load_state_dict(torch.load('model.pt'Ś))
 for period in range(1, no_periods + 1):
+
+
     t.period = period
     t.fsim = fl.flame_sim(no_frames=1000, frame_skip=frame_skip)
     t.fsim.igni_time = no_frames

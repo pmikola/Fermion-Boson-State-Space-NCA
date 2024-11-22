@@ -248,12 +248,12 @@ class teacher(nn.Module):
                 noise_mod = 0.
             else:
                 noise_mod = 1.
-            if noise_flag < 3:
+            if noise_flag < 5:
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
                 noise_variance_in_binary = torch.zeros(32).to(self.device)
                 noise_variance_out_binary = torch.zeros(32).to(self.device)
-            elif 3 < noise_flag < 8:
+            elif 5 < noise_flag < 8:
                 noise_variance_in = torch.rand(size=(1,)) * noise_mod
                 noise_variance_in_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_in).tobytes())
                 noise_variance_in = noise_variance_in.to(self.device)
@@ -1239,7 +1239,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 30:
+                    if reiterate_counter > 50:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -1344,7 +1344,7 @@ class teacher(nn.Module):
         plt.yscale("log")
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.legend(bbox_to_anchor=(1.05, 1.0),loc='upper center')
+        plt.legend(bbox_to_anchor=(1.15, 1.0),loc='upper center')
         plt.grid(True)
         plt.show()
 
@@ -1661,7 +1661,7 @@ class teacher(nn.Module):
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
         temperature = 0.1 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
-        disc_loss = -torch.log(self.disc_loss[-1])*2e1 + 1e-8
+        disc_loss = -torch.log(self.disc_loss[-1])
 
         # if self.epoch == 5:
         #     ls = [vsi_loss ,entropy_loss   , kl_loss  , sink_loss  , diff_fft_loss  , critical_loss  , diff_loss  , fft_loss  ,  value_loss , ortho_mean  , log_det_jacobian_loss.mean()  , b_loss  , hf_e_loss  , freq_loss.mean()]
@@ -1677,25 +1677,35 @@ class teacher(nn.Module):
         #final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
         # final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
 
-        final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) , disc_loss.mean().unsqueeze(0)*10 ,
-                                entropy_loss.mean().unsqueeze(0)*5e-2 * model.B.unsqueeze(0) , grad_penalty.mean().unsqueeze(0) * 2e-8 ,
-                                kl_loss.mean().unsqueeze(0)*5e-6 * model.C.unsqueeze(0) , sink_loss.mean().unsqueeze(0)*8e-1 * model.D.unsqueeze(0) ,
-                                diff_fft_loss.mean().unsqueeze(0)*1e3 * model.E.unsqueeze(0) , critical_loss.mean().unsqueeze(0)*2e-1 * model.F.unsqueeze(0) ,
-                                diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) , fft_loss.mean().unsqueeze(0)*2e4 * model.H.unsqueeze(0) ,
-                                model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) , ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
-                                log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) , b_loss.mean().unsqueeze(0)*1e-5 * model.L.unsqueeze(0) ,
-                                hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) , freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0)],dim=0)
+        final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
+                                torch.abs((0.5*6)**3+(disc_loss.mean().unsqueeze(0)*6)**3) ,
+                                entropy_loss.mean().unsqueeze(0)*5e-2 * model.B.unsqueeze(0) ,
+                                grad_penalty.mean().unsqueeze(0) * 2e-2 ,
+                                kl_loss.mean().unsqueeze(0)*1e-6 * model.C.unsqueeze(0) ,
+                                sink_loss.mean().unsqueeze(0)*2e-1 * model.D.unsqueeze(0) ,
+                                diff_fft_loss.mean().unsqueeze(0)*1e3 * model.E.unsqueeze(0) ,
+                                critical_loss.mean().unsqueeze(0)*2e-1 * model.F.unsqueeze(0) ,
+                                diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) ,
+                                fft_loss.mean().unsqueeze(0)*2e4 * model.H.unsqueeze(0) ,
+                                model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) ,
+                                ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
+                                log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
+                                b_loss.mean().unsqueeze(0)*6e-6 * model.L.unsqueeze(0) ,
+                                hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) ,
+                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0)],
+                               dim=0)
+        #print(final_loss.tolist())
 
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return (torch.sum(final_loss),
+        return (torch.mean(final_loss),
                 vsi_loss* model.A*2,
                 entropy_loss* model.B*5e-2,
-                grad_penalty* 2e-8 ,
-                kl_loss* model.C*5e-6,
-                sink_loss* model.D*8e-1,
+                grad_penalty* 2e-2 ,
+                kl_loss* model.C*1e-6,
+                sink_loss* model.D*2e-1,
                 critical_loss* model.F*2e-1,
                 hf_e_loss* model.M*5e-1,
-                b_loss* model.L*1e-5,
+                b_loss* model.L*6e-6,
                 2e1*value_loss* model.I,
                 diff_fft_loss* model.E*1e3,
                 fft_loss* model.H*2e4,

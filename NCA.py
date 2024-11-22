@@ -3,6 +3,7 @@ import time
 import torch
 from linformer import Linformer
 from matplotlib import pyplot as plt
+from scipy.constants import fermi
 from torch import nn
 from WaveletModel import WaveletModel
 from torch.nn.utils import spectral_norm as sn
@@ -20,7 +21,7 @@ class NCA(nn.Module):
         self.patch_size_y = 15
         self.channels = channels
         self.kernel_size = 3
-        self.wavelet_scales = 10
+        self.wavelet_scales = 5
         self.max_wavelet_scale = 20
         self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
@@ -41,7 +42,7 @@ class NCA(nn.Module):
         self.fermion_features = Linformer(
             dim=self.channels*self.fermion_number*self.wavelet_scales,
             seq_len= self.patch_size_x * self.patch_size_y,
-            depth=2,
+            depth=1,
             heads=self.fermion_number,
             dim_head =self.fermion_number,
             one_kv_head = False,
@@ -54,7 +55,7 @@ class NCA(nn.Module):
         self.boson_features = Linformer(
             dim=self.channels*self.boson_number*self.wavelet_scales,
             seq_len= self.patch_size_x * self.patch_size_y,
-            depth=2,
+            depth=1,
             heads=self.boson_number,
             dim_head=self.boson_number,
             one_kv_head=False,
@@ -63,6 +64,7 @@ class NCA(nn.Module):
             dropout=0.00,
             k=self.patch_size_x * self.patch_size_y
         )
+
         self.project_fermions_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.fermion_number  * torch.sum(self.fermion_kernels_size**3)*self.channels,kernel_size=1)
         self.project_bosons_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.boson_number  * torch.sum(self.boson_kernels_size**3)*self.channels,kernel_size=1)
 
@@ -75,18 +77,23 @@ class NCA(nn.Module):
         self.wvl_layer_norm = nn.LayerNorm(self.channels*self.particle_number*self.wavelet_scales).to(self.device)
 
         self.learned_fermion_kernels = nn.ParameterList([
-            nn.ParameterList([nn.Parameter(torch.randn(self.fermion_number, self.channels, k, k, k), requires_grad=False)
+            nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.fermion_number, self.channels, k, k, k), requires_grad=False))
                 for k in range(1,self.kernel_size+1,2)])
             for _ in range(num_steps)])
 
         self.learned_boson_kernels = nn.ParameterList([
-            nn.ParameterList([nn.Parameter(torch.randn(self.boson_number, self.channels, k, k, k), requires_grad=False)
+            nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.boson_number, self.channels, k, k, k), requires_grad=False))
                 for k in range(1,self.kernel_size+1,2)])
             for _ in range(num_steps)])
         self.act = nn.ELU(alpha=2.)
         # self.act = nn.GELU()
-        self.step_param = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
-        self.spike_scale = nn.Parameter(torch.rand( self.num_steps), requires_grad=True)
+        self.step_param = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
+        self.spike_scale = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
+
+    @staticmethod
+    def _init_orthogonal_kernel( param):
+        nn.init.orthogonal_(param)
+        return param
 
     def nca_update(self, x,meta_embeddings,spiking_probabilities,hf_data,batch_size):
         self.batch_size = batch_size
@@ -116,15 +123,12 @@ class NCA(nn.Module):
                 boson_kernels = self.act(self.boson_features(wavelet_space))
                 #ortho_mean_b, ortho_max_b = self.validate_channel_orthogonality(boson_kernels)
                 #ortho_mean, ortho_max = ortho_mean_f+ortho_mean_b,ortho_max_f+ortho_max_b
-
-
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
                 boson_kernels = self.act(self.project_bosons_seq(boson_kernels)).permute(0, 2, 1)
                 fermion_kernels = self.act(self.project_fermions_feature(fermion_kernels))
                 boson_kernels = self.act(self.project_bosons_feature(boson_kernels))
-
-                fermion_kernels = fermion_kernels.mean(dim=0)
-                boson_kernels = boson_kernels.mean(dim=0)
+                fermion_kernels = torch.mean(fermion_kernels,dim=0)
+                boson_kernels= torch.mean(boson_kernels,dim=0)
                 l_idx = 0
                 f_kernels = []
                 k_idx = 0
