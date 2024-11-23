@@ -1182,7 +1182,7 @@ class teacher(nn.Module):
                 self.entropy_loss.append(loss[2].item())
                 self.grad_penalty.append(loss[3].item())
                 self.kl_loss.append(loss[4].item())
-                self.sink_loss.append(loss[5].item())
+                #self.sink_loss.append(loss[5].item())
                 self.critical_loss.append(loss[6].item())
                 self.hf_e_loss.append(loss[7].item())
                 self.b_loss.append(loss[8].item())
@@ -1196,7 +1196,7 @@ class teacher(nn.Module):
                 self.val_entropy_loss.append(val_loss[2].item())
                 self.val_grad_penalty.append(val_loss[3].item())
                 self.val_kl_loss.append(val_loss[4].item())
-                self.val_sink_loss.append(val_loss[5].item())
+                #self.val_sink_loss.append(val_loss[5].item())
                 self.val_critical_loss.append(val_loss[6].item())
                 self.val_hf_e_loss.append(val_loss[7].item())
                 self.val_b_loss.append(val_loss[8].item())
@@ -1239,7 +1239,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 50:
+                    if reiterate_counter > 20:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))
@@ -1253,9 +1253,9 @@ class teacher(nn.Module):
                     # NOTE: lowering lr for  better performance and reset lr within conditions
                     if grad_counter == 20 or reiterate_data == 0:
                         for param_group in optimizer.param_groups:
-                            param_group['lr'] = param_group['lr'] * 0.9995
-                            if param_group['lr'] < 2e-5: #or reiterate_data == 0:
-                                param_group['lr'] = 2e-3
+                            param_group['lr'] = param_group['lr'] * 0.995
+                            if param_group['lr'] < 1e-5: #or reiterate_data == 0:
+                                param_group['lr'] = 1e-3
                                 reiterate_counter = 0
                                 reiterate_data = 0
                                 print('optimizer -> lr back to starting point')
@@ -1315,20 +1315,20 @@ class teacher(nn.Module):
         plt.plot(self.diff_loss,label='diff_loss')
         plt.plot(self.log_det_jacobian_loss,label='log_det_jacobian_loss')
         plt.plot(self.freq_loss,label='freq_loss')
-        plt.plot(self.val_vsi_loss,label='val_vsi_loss',linestyle='--')
-        plt.plot(self.val_entropy_loss,label='val_entropy_loss',linestyle='--')
-        plt.plot(self.val_grad_penalty,label='val_grad_penalty',linestyle='--')
-        plt.plot(self.val_kl_loss,label='val_kl_loss',linestyle='--')
-        plt.plot(self.val_sink_loss,label='val_sink_loss',linestyle='--')
-        plt.plot(self.val_critical_loss,label='val_critical_loss',linestyle='--')
-        plt.plot(self.val_hf_e_loss,label='val_hf_e_loss',linestyle='--')
-        plt.plot(self.val_b_loss,label='val_b_loss',linestyle='--')
-        plt.plot(self.val_value_loss,label='val_value_loss',linestyle='--')
-        plt.plot(self.val_diff_fft_loss,label='val_diff_fft_loss',linestyle='--')
-        plt.plot(self.val_fft_loss,label='val_fft_loss',linestyle='--')
-        plt.plot(self.val_diff_loss,label='val_diff_loss',linestyle='--')
-        plt.plot(self.val_log_det_jacobian_loss, label='val_log_det_jacobian_loss',linestyle='--')
-        plt.plot(self.val_freq_loss, label='val_freq_loss',linestyle='--')
+        # plt.plot(self.val_vsi_loss,label='val_vsi_loss',linestyle='--')
+        # plt.plot(self.val_entropy_loss,label='val_entropy_loss',linestyle='--')
+        # plt.plot(self.val_grad_penalty,label='val_grad_penalty',linestyle='--')
+        # plt.plot(self.val_kl_loss,label='val_kl_loss',linestyle='--')
+        # plt.plot(self.val_sink_loss,label='val_sink_loss',linestyle='--')
+        # plt.plot(self.val_critical_loss,label='val_critical_loss',linestyle='--')
+        # plt.plot(self.val_hf_e_loss,label='val_hf_e_loss',linestyle='--')
+        # plt.plot(self.val_b_loss,label='val_b_loss',linestyle='--')
+        # plt.plot(self.val_value_loss,label='val_value_loss',linestyle='--')
+        # plt.plot(self.val_diff_fft_loss,label='val_diff_fft_loss',linestyle='--')
+        # plt.plot(self.val_fft_loss,label='val_fft_loss',linestyle='--')
+        # plt.plot(self.val_diff_loss,label='val_diff_loss',linestyle='--')
+        # plt.plot(self.val_log_det_jacobian_loss, label='val_log_det_jacobian_loss',linestyle='--')
+        # plt.plot(self.val_freq_loss, label='val_freq_loss',linestyle='--')
         plt.plot(self.cpu_temp,label='cpu_temp')
         plt.plot(self.gpu_temp,label='gpu_temp')
 
@@ -1344,7 +1344,7 @@ class teacher(nn.Module):
         plt.yscale("log")
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.legend(bbox_to_anchor=(1.15, 1.0),loc='upper center')
+        plt.legend(bbox_to_anchor=(1.06, 1.0),loc='upper center')
         plt.grid(True)
         plt.show()
 
@@ -1678,7 +1678,7 @@ class teacher(nn.Module):
         # final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
 
         final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
-                                torch.abs((0.5*6)**3+(disc_loss.mean().unsqueeze(0)*6)**3) ,
+                                torch.abs((disc_loss.mean().unsqueeze(0)**2)-(disc_loss.mean().unsqueeze(0))+(0.5**2))*20,
                                 entropy_loss.mean().unsqueeze(0)*5e-2 * model.B.unsqueeze(0) ,
                                 grad_penalty.mean().unsqueeze(0) * 2e-2 ,
                                 kl_loss.mean().unsqueeze(0)*1e-6 * model.C.unsqueeze(0) ,
@@ -1690,10 +1690,10 @@ class teacher(nn.Module):
                                 model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) ,
                                 ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
                                 log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
-                                b_loss.mean().unsqueeze(0)*6e-6 * model.L.unsqueeze(0) ,
+                                b_loss.mean()*6e-6 * model.L.unsqueeze(0) ,
                                 hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) ,
-                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0)],
-                               dim=0)
+                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0)
+                               ],dim=0)
         #print(final_loss.tolist())
 
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)

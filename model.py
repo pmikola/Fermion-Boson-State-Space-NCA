@@ -30,7 +30,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.cross_correlate_out = nn.Conv3d(in_channels=self.hdc_dim, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.nca_steps = nca_steps
-        self.act = nn.ELU(alpha=2.0)
+        self.act = nn.ELU(alpha=3.0)
         self.A, self.B, self.C, self.D, self.E, self.F, self.G, self.H, self.I, self.J, self.K, self.L, self.M, self.N = torch.nn.Parameter(torch.full((14,),1.),requires_grad=True).to(self.device)
 
         # self.act = nn.GELU()
@@ -157,10 +157,9 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
 
         x = self.act(self.uplift_data(data))
         x = x.unsqueeze(1)
-        x = self.act(self.cross_correlate_in(x))
-        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x,meta_embeddings,spiking_probabilities,hf_data,self.batch_size)
-
-        x = self.act(self.cross_correlate_out(x))
+        x_i = self.act(self.cross_correlate_in(x))
+        x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x_i,meta_embeddings,spiking_probabilities,hf_data,self.batch_size)
+        x = self.act(self.cross_correlate_out(x))+x_i
         x = self.act(self.downlift_data(x))
         rgbas = self.act(self.rgbas(x))
 

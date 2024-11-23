@@ -57,7 +57,7 @@ class WaveletModel(nn.Module):
         sin_component = scaled_amp * torch.sin(phase)*self.phase_mod[i,0]
         cos_component = scaled_amp * torch.cos(phase)*self.phase_mod[i,1]
         sinc_component = scaled_amp * torch.sinc(phase / torch.pi) * self.phase_mod[i, 2]
-        wavelet = sin_component + cos_component + sinc_component
+        wavelet = torch.abs(sin_component * cos_component * sinc_component)
         return wavelet
 
     def cwt(self,x, scales,i, device="cuda"):

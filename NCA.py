@@ -49,7 +49,7 @@ class NCA(nn.Module):
             share_kv = False,
             reversible = True,
             dropout = 0.00,
-            k=self.patch_size_x * self.patch_size_y
+            k=self.channels*self.fermion_number*self.wavelet_scales
         )
 
         self.boson_features = Linformer(
@@ -62,14 +62,14 @@ class NCA(nn.Module):
             share_kv=False,
             reversible=True,
             dropout=0.00,
-            k=self.patch_size_x * self.patch_size_y
+            k=self.channels*self.fermion_number*self.wavelet_scales
         )
 
-        self.project_fermions_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.fermion_number  * torch.sum(self.fermion_kernels_size**3)*self.channels,kernel_size=1)
-        self.project_bosons_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.boson_number  * torch.sum(self.boson_kernels_size**3)*self.channels,kernel_size=1)
+        self.project_fermions_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.fermion_number  * torch.sum(self.fermion_kernels_size**3)*self.channels,kernel_size=3,padding=1)
+        self.project_bosons_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.boson_number  * torch.sum(self.boson_kernels_size**3)*self.channels,kernel_size=3,padding=1)
 
-        self.project_fermions_feature = nn.Conv1d(self.channels*self.fermion_number*self.wavelet_scales, self.channels,kernel_size=1)
-        self.project_bosons_feature = nn.Conv1d(self.channels*self.boson_number*self.wavelet_scales,self.channels, kernel_size=1)
+        self.project_fermions_feature = nn.Conv1d(self.channels*self.fermion_number*self.wavelet_scales, self.channels,kernel_size=3,padding=1)
+        self.project_bosons_feature = nn.Conv1d(self.channels*self.boson_number*self.wavelet_scales,self.channels,kernel_size=3,padding=1)
 
         self.common_nca_pool_layer_norm = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y]).to(self.device)
         self.lnorm_fermion = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
@@ -85,7 +85,7 @@ class NCA(nn.Module):
             nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.boson_number, self.channels, k, k, k), requires_grad=False))
                 for k in range(1,self.kernel_size+1,2)])
             for _ in range(num_steps)])
-        self.act = nn.ELU(alpha=2.)
+        self.act = nn.ELU(alpha=3.)
         # self.act = nn.GELU()
         self.step_param = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
@@ -159,9 +159,9 @@ class NCA(nn.Module):
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response,b_log_det_jacobian = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-                energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i] +
+                energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
                                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
-                                                     self.spike_scale[i])  # Note: Progressing NCA dynamics by dx
+                                                     self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3, 4],unbiased=False)
 
                 f_log_det_loss = self.fermionic_NCA.normalizing_flow_loss(fermionic_response,f_log_det_jacobian)
@@ -180,7 +180,7 @@ class NCA(nn.Module):
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response,_ = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-                energy_spectrum = energy_spectrum + (bosonic_energy_states * self.step_param[i]) # Note: Progressing NCA dynamics by dx
+                energy_spectrum = (bosonic_energy_states * self.step_param[i])+energy_spectrum # Note: Progressing NCA dynamics by dx
 
                 nca_var, ortho_mean, ortho_max,log_det_j_loss ,freq_loss= None,None,None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
@@ -190,7 +190,7 @@ class NCA(nn.Module):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
 
-    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.85):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
         fft_k_shifted = torch.fft.fftshift(fft_k)
@@ -232,7 +232,7 @@ class FermionConvLayer(nn.Module):
         self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
-        self.act = nn.ELU(alpha=2.)
+        self.act = nn.ELU(alpha=3.)
         self.kernel_size= kernel_size
 
     def normalizing_flow_loss(self,z, log_det_jacobian):
@@ -266,7 +266,7 @@ class BosonConvLayer(nn.Module):
         self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
-        self.act = nn.ELU(alpha=2.)
+        self.act = nn.ELU(alpha=3.)
         self.kernel_size = kernel_size
 
     def normalizing_flow_loss(self,z, log_det_jacobian):
