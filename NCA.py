@@ -190,7 +190,7 @@ class NCA(nn.Module):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
 
-    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.85):
+    def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
         fft_k_shifted = torch.fft.fftshift(fft_k)

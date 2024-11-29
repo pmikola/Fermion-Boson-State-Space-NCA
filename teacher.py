@@ -19,6 +19,7 @@ from matplotlib import pyplot as plt, animation
 from torch.autograd import grad
 import torch.nn.utils as nn_utils
 import torch.nn.functional as f
+from torchvision.transforms import transforms
 from torchvision.transforms.v2.functional import adjust_hue_image
 from VSI_Metric import VS_ESSIM
 
@@ -127,6 +128,14 @@ class teacher(nn.Module):
         self.alpha_slices = None
         self.meta_binary_slices = None
         self.loss_coeffs = torch.ones(5,requires_grad=False).to(self.device)
+        self.preprocess = transforms.Compose([
+                        AddGaussianNoise(self.device, 0, 1),
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                    ])
+
+        self.validator = torch.hub.load(repo_or_dir="miccunifi/ARNIQA", source="github", model="ARNIQA",
+                               regressor_dataset="kadid10k")
+        self.validator.eval().to(device)
 
 
     def generate_structure(self):
@@ -843,17 +852,17 @@ class teacher(nn.Module):
         plt.plot(self.train_loss, color='blue',label='train')
         plt.plot(self.val_loss, color='orange',label='test')
         plt.plot(np.array(torch.tensor(self.disc_loss).cpu()), color='red', label='disc')
-        #plt.plot(self.vsi_loss,label='vsi_loss')
-        #plt.plot(self.entropy_loss,label='entropy_loss')
+        plt.plot(self.vsi_loss,label='vsi_loss',linestyle=':')
+        # plt.plot(self.entropy_loss,label='entropy_loss',marker='p')
         plt.plot(self.grad_penalty,label='grad_penalty')
-        #plt.plot(self.kl_loss,label='kl_loss')
-        plt.plot(self.sink_loss,label='sink_loss')
-        plt.plot(self.critical_loss,label='critical_loss')
-        plt.plot(self.hf_e_loss,label='hf_e_loss')
-        plt.plot(self.b_loss,label='b_loss')
-        plt.plot(self.value_loss,label='value_loss')
-        plt.plot(self.diff_fft_loss,label='diff_fft_loss')
-        plt.plot(self.fft_loss,label='fft_loss')
+        #plt.plot(self.kl_loss,label='kl_loss',marker='h')
+        plt.plot(self.sink_loss,label='sink_loss',marker='^')
+        plt.plot(self.critical_loss,label='critical_loss',linestyle='--')
+        plt.plot(self.hf_e_loss,label='hf_e_loss',marker='+')
+        plt.plot(self.b_loss,label='b_loss',marker='o')
+        plt.plot(self.value_loss,label='value_loss',marker='s')
+        plt.plot(self.diff_fft_loss,label='diff_fft_loss',linestyle='-.')
+        plt.plot(self.fft_loss,label='fft_loss',marker='v')
         #plt.plot(self.diff_loss,label='diff_loss')
         plt.plot(self.log_det_jacobian_loss,label='log_det_jacobian_loss')
         #plt.plot(self.freq_loss,label='freq_loss')
@@ -1438,6 +1447,15 @@ class teacher(nn.Module):
             t_1 = t_1.unsqueeze(0).expand(n, -1, -1, -1).reshape(-1, t_1.shape[1], t_1.shape[1])
         # Solution for learning of the dynamics in loss calculation
 
+        # Note: Iage Validation of RGB channels
+        # pred_rgb = torch.sigmoid(torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)], dim=1))
+        # # true_rgb = torch.sigmoid(torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)], dim=1))
+        #
+        # p1 = self.preprocess(pred_rgb)
+        # p2 = self.preprocess(pred_rgb)
+        # pred_validator_score = self.validator(p1,p2, return_embedding=False, scale_score=True).clamp(0,1)
+        # print(pred_validator_score)
+
 
         # NOTE: Firs order difference
         # diff_r_true = r_out - r_in
@@ -1537,13 +1555,12 @@ class teacher(nn.Module):
         s_loss += torch.mean(loss_s, dim=[1, 2])
 
         # Note: Edge Loss
-
         boundary_loss_r = self.boundary_loss(t * pred_r+ t_1 * r_out,r_out)
         boundary_loss_g = self.boundary_loss(t * pred_g + t_1 * g_out, g_out)
         boundary_loss_b = self.boundary_loss(t * pred_b + t_1 * b_out, b_out)
         boundary_loss_a = self.boundary_loss(t * pred_a + t_1 * a_out, a_out)
         boundary_loss_s = self.boundary_loss(t * pred_s + t_1 * s_out, s_out)
-        b_loss  = torch.mean(boundary_loss_r+boundary_loss_g+boundary_loss_b+boundary_loss_a+boundary_loss_s)
+        boundary_loss  = torch.mean(boundary_loss_r+boundary_loss_g+boundary_loss_b+boundary_loss_a+boundary_loss_s)
 
         # v_loss_r = self.total_variation_loss(pred_r)
         # v_loss_g = self.total_variation_loss(pred_g)
@@ -1568,7 +1585,6 @@ class teacher(nn.Module):
 
         t = t.squeeze()
         t_1 = t_1.squeeze()
-
         # NCA Criticality loss
         target_variance = torch.full_like(nca_var,0.49,requires_grad=True)
         critical_loss = torch.mean(torch.abs(target_variance - nca_var))
@@ -1593,50 +1609,50 @@ class teacher(nn.Module):
         s_loss += sink_loss_s
 
         # KL Div LOSS
-        # pred_distribution_r = f.softmax(t.unsqueeze(1).unsqueeze(2)*pred_r.flatten(start_dim=1), dim=-1)
-        # target_distribution_r = f.softmax(r_out.flatten(start_dim=1), dim=-1)
-        # target_distribution_r_w = f.softmax(t_1.unsqueeze(1).unsqueeze(2)*r_out.flatten(start_dim=1), dim=-1)
-        # pred_distribution_g = f.softmax(t.unsqueeze(1).unsqueeze(2)*pred_g.flatten(start_dim=1), dim=-1)
-        # target_distribution_g = f.softmax(g_out.flatten(start_dim=1), dim=-1)
-        # target_distribution_g_w = f.softmax(t_1.unsqueeze(1).unsqueeze(2)*g_out.flatten(start_dim=1), dim=-1)
-        # pred_distribution_b = f.softmax(t.unsqueeze(1).unsqueeze(2)*pred_b.flatten(start_dim=1), dim=-1)
-        # target_distribution_b = f.softmax(b_out.flatten(start_dim=1), dim=-1)
-        # target_distribution_b_w = f.softmax(t_1.unsqueeze(1).unsqueeze(2)*b_out.flatten(start_dim=1), dim=-1)
-        # pred_distribution_a = f.softmax(t.unsqueeze(1).unsqueeze(2)*pred_a.flatten(start_dim=1), dim=-1)
-        # target_distribution_a = f.softmax(a_out.flatten(start_dim=1), dim=-1)
-        # target_distribution_a_w = f.softmax(t_1.unsqueeze(1).unsqueeze(2)*a_out.flatten(start_dim=1), dim=-1)
-        # pred_distribution_s = f.softmax(t.unsqueeze(1).unsqueeze(2)*pred_s.flatten(start_dim=1), dim=-1)
-        # target_distribution_s = f.softmax(s_out.flatten(start_dim=1), dim=-1)
-        # target_distribution_s_w = f.softmax(t_1.unsqueeze(1).unsqueeze(2)*s_out.flatten(start_dim=1), dim=-1)
-        # kl_loss_r = f.kl_div(pred_distribution_r.log()+target_distribution_r_w.log(), target_distribution_r.log(), reduction="batchmean", log_target=True)
-        # kl_loss_g = f.kl_div(pred_distribution_g.log()+target_distribution_g_w.log(), target_distribution_g.log(), reduction="batchmean", log_target=True)
-        # kl_loss_b = f.kl_div(pred_distribution_b.log()+target_distribution_b_w.log(), target_distribution_b.log(), reduction="batchmean", log_target=True)
-        # kl_loss_a = f.kl_div(pred_distribution_a.log()+target_distribution_a_w.log(), target_distribution_a.log(), reduction="batchmean", log_target=True)
-        # kl_loss_s = f.kl_div(pred_distribution_s.log()+target_distribution_s_w.log(), target_distribution_s.log(), reduction="batchmean", log_target=True)
-        #
-        # # Combine the separate KL divergence losses if desired
-        # kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
-        #
-        # r_loss += kl_loss_r
-        # g_loss += kl_loss_g
-        # b_loss += kl_loss_b
-        # a_loss += kl_loss_a
-        # s_loss += kl_loss_s
+        pred_distribution_r = f.log_softmax(t.unsqueeze(1).unsqueeze(2)*pred_r.flatten(start_dim=1), dim=-1)
+        target_distribution_r = f.softmax(r_out.flatten(start_dim=1), dim=-1)
+        target_distribution_r_w = f.log_softmax(t_1.unsqueeze(1).unsqueeze(2)*r_out.flatten(start_dim=1), dim=-1)
+        pred_distribution_g = f.log_softmax(t.unsqueeze(1).unsqueeze(2)*pred_g.flatten(start_dim=1), dim=-1)
+        target_distribution_g = f.softmax(g_out.flatten(start_dim=1), dim=-1)
+        target_distribution_g_w = f.log_softmax(t_1.unsqueeze(1).unsqueeze(2)*g_out.flatten(start_dim=1), dim=-1)
+        pred_distribution_b = f.log_softmax(t.unsqueeze(1).unsqueeze(2)*pred_b.flatten(start_dim=1), dim=-1)
+        target_distribution_b = f.softmax(b_out.flatten(start_dim=1), dim=-1)
+        target_distribution_b_w = f.log_softmax(t_1.unsqueeze(1).unsqueeze(2)*b_out.flatten(start_dim=1), dim=-1)
+        pred_distribution_a = f.log_softmax(t.unsqueeze(1).unsqueeze(2)*pred_a.flatten(start_dim=1), dim=-1)
+        target_distribution_a = f.softmax(a_out.flatten(start_dim=1), dim=-1)
+        target_distribution_a_w = f.log_softmax(t_1.unsqueeze(1).unsqueeze(2)*a_out.flatten(start_dim=1), dim=-1)
+        pred_distribution_s = f.log_softmax(t.unsqueeze(1).unsqueeze(2)*pred_s.flatten(start_dim=1), dim=-1)
+        target_distribution_s = f.softmax(s_out.flatten(start_dim=1), dim=-1)
+        target_distribution_s_w = f.log_softmax(t_1.unsqueeze(1).unsqueeze(2)*s_out.flatten(start_dim=1), dim=-1)
+        kl_loss_r = f.kl_div(pred_distribution_r+target_distribution_r_w, target_distribution_r, reduction="sum", log_target=False)
+        kl_loss_g = f.kl_div(pred_distribution_g+target_distribution_g_w, target_distribution_g, reduction="sum", log_target=False)
+        kl_loss_b = f.kl_div(pred_distribution_b+target_distribution_b_w, target_distribution_b, reduction="sum", log_target=False)
+        kl_loss_a = f.kl_div(pred_distribution_a+target_distribution_a_w, target_distribution_a, reduction="sum", log_target=False)
+        kl_loss_s = f.kl_div(pred_distribution_s+target_distribution_s_w, target_distribution_s, reduction="sum", log_target=False)
 
+        # Combine the separate KL divergence losses if desired
+        #kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
+
+        r_loss += kl_loss_r
+        g_loss += kl_loss_g
+        b_loss += kl_loss_b
+        a_loss += kl_loss_a
+        s_loss += kl_loss_s
         grad_penalty = torch.mean(criterion.gradient_penalty(model))
 
-        # entropy_loss = 0
-        # for pred_channel,true_channel_w ,true_channel,losses in zip([t.unsqueeze(1).unsqueeze(2)*pred_r, t.unsqueeze(1).unsqueeze(2)*pred_g, t.unsqueeze(1).unsqueeze(2)*pred_b, t.unsqueeze(1).unsqueeze(2)*pred_a, t.unsqueeze(1).unsqueeze(2)*pred_s],
-        #                                                             [t_1.unsqueeze(1).unsqueeze(2)*r_out, t_1.unsqueeze(1).unsqueeze(2)*g_out, t_1.unsqueeze(1).unsqueeze(2)*b_out, t_1.unsqueeze(1).unsqueeze(2)*a_out, t_1.unsqueeze(1).unsqueeze(2)*s_out],
-        #                                                             [r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
-        #     p_pred = f.softmax(pred_channel.flatten(), dim=0)
-        #     p_true = f.softmax(true_channel.flatten(), dim=0)
-        #     p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
-        #     entropy_pred = -torch.sum(p_pred * torch.log(p_pred + 1e-9))
-        #     entropy_true = -torch.sum(p_true * torch.log(p_true + 1e-9))
-        #     entropy_true_w = -torch.sum(p_true_w * torch.log(p_true_w + 1e-9))
-        #     entropy_loss += torch.abs(entropy_pred+entropy_true_w - entropy_true)
-        #     losses += entropy_loss
+        entropy_loss = 0
+        for pred_channel,true_channel_w ,true_channel,losses in zip([t.unsqueeze(1).unsqueeze(2)*pred_r, t.unsqueeze(1).unsqueeze(2)*pred_g, t.unsqueeze(1).unsqueeze(2)*pred_b, t.unsqueeze(1).unsqueeze(2)*pred_a, t.unsqueeze(1).unsqueeze(2)*pred_s],
+                                                                    [t_1.unsqueeze(1).unsqueeze(2)*r_out, t_1.unsqueeze(1).unsqueeze(2)*g_out, t_1.unsqueeze(1).unsqueeze(2)*b_out, t_1.unsqueeze(1).unsqueeze(2)*a_out, t_1.unsqueeze(1).unsqueeze(2)*s_out],
+                                                                    [r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
+            p_pred = f.softmax(pred_channel.flatten(), dim=0)
+            p_true = f.softmax(true_channel.flatten(), dim=0)
+            p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
+            entropy_pred = torch.sum(-p_pred * torch.log(p_pred + 1e-9))
+            entropy_true = torch.sum(-p_true * torch.log(p_true + 1e-9))
+            entropy_true_w = torch.sum(-p_true_w * torch.log(p_true_w + 1e-9))
+            entropy_loss += criterion(entropy_pred+entropy_true_w , entropy_true)
+            losses += entropy_loss
+
 
         self.loss_coeffs[0] = r_loss.mean().item()
         self.loss_coeffs[1] = g_loss.mean().item()
@@ -1644,23 +1660,24 @@ class teacher(nn.Module):
         self.loss_coeffs[3] = a_loss.mean().item()
         self.loss_coeffs[4] = s_loss.mean().item()
 
-        # rgb_pred = torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)],dim=1)
-        # rgb_true = torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)],dim=1)
-        # rgb_pred = rgb_pred - rgb_pred.min()
-        # rgb_pred = rgb_pred / rgb_pred.max()
-        # rgb_true = rgb_true - rgb_true.min()
-        # rgb_true = rgb_true / rgb_true.max()
-        # rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
-        # rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.).clamp(0,1)
-        # t = t.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-        # t_1 = t_1.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        rgb_pred = torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)],dim=1)
+        rgb_true = torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)],dim=1)
+        rgb_pred = rgb_pred - rgb_pred.min()
+        rgb_pred = rgb_pred / rgb_pred.max()
+        rgb_true = rgb_true - rgb_true.min()
+        rgb_true = rgb_true / rgb_true.max()
+        rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.)#.clamp(0,1)
+        rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.)#.clamp(0,1)
+        t = t.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+        t_1 = t_1.unsqueeze(1).unsqueeze(2).unsqueeze(3)
         #print(t*rgb_pred.max(),t_1*rgb_true.max(),t*rgb_pred.min(),t_1*rgb_true.min(),rgb_true.min(),rgb_true.max())
-        #vsi_loss = self.vsi(t*rgb_pred+t_1*rgb_true,rgb_true)
+        vsi_loss = self.vsi(t*rgb_pred+t_1*rgb_true,rgb_true)
         loss_min = self.loss_coeffs.min()
         loss_range = self.loss_coeffs.max() - loss_min + 1e-12
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
-        temperature = 0.1 + 0.5 * normalized_loss_coeffs.std().item()
+        temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
+        #print( self.loss_coeffs)
         disc_loss = -torch.log(self.disc_loss[-1])
 
         # if self.epoch == 5:
@@ -1677,41 +1694,40 @@ class teacher(nn.Module):
         #final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
         # final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
 
-        final_loss = torch.cat([#vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
+        final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
                                 torch.abs((disc_loss.mean().unsqueeze(0)**2)-(disc_loss.mean().unsqueeze(0))+(0.5**2))*20,
-                                #entropy_loss.mean().unsqueeze(0)*5e-2 * model.B.unsqueeze(0) ,
+                                #entropy_loss.mean().unsqueeze(0)*1e-1 * model.B.unsqueeze(0) ,
                                 grad_penalty.mean().unsqueeze(0) * 2e-2 ,
                                 #kl_loss.mean().unsqueeze(0)*1e-6 * model.C.unsqueeze(0) ,
                                 sink_loss.mean().unsqueeze(0)*2e-1 * model.D.unsqueeze(0) ,
                                 diff_fft_loss.mean().unsqueeze(0)*1e3 * model.E.unsqueeze(0) ,
                                 critical_loss.mean().unsqueeze(0)*2e-1 * model.F.unsqueeze(0) ,
                                 #diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) ,
-                                fft_loss.mean().unsqueeze(0)*2e4 * model.H.unsqueeze(0) ,
+                                fft_loss.mean().unsqueeze(0)*5e3 * model.H.unsqueeze(0) ,
                                 model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) ,
                                 ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
                                 log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
-                                b_loss.mean()*6e-4 * model.L.unsqueeze(0) ,
+                                boundary_loss.mean()*5e-1 * model.L.unsqueeze(0) ,
                                 hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) ,
-                                #freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0)
+                                #freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
                                ],dim=0)
         #print(final_loss.tolist())
-
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
         return (torch.mean(final_loss),
-                model.A,#*2*vsi_loss* ,
-                model.B,#*5e-2*entropy_loss*,
+                model.A*2*vsi_loss ,
+                model.B,#*entropy_loss,
                 grad_penalty* 2e-2 ,
                 model.C,#*1e-6*kl_loss,
                 sink_loss* model.D*2e-1,
                 critical_loss* model.F*2e-1,
                 hf_e_loss* model.M*5e-1,
-                b_loss* model.L*6e-4,
+                boundary_loss* model.L*5e-1,
                 2e1*value_loss* model.I,
                 diff_fft_loss* model.E*1e3,
-                fft_loss* model.H*2e4,
+                fft_loss* model.H*5e3,
                 model.G,#*1e1*diff_loss*,
                 log_det_jacobian_loss.mean()* model.K*1e-6,
-                model.N)#*freq_loss.mean()*1e-3)
+                model.N*freq_loss.mean()*1e-3)
 
 
     def boundary_loss(self,pred, target):
@@ -1834,3 +1850,16 @@ class teacher(nn.Module):
         np.random.seed(2024 + s)
         s = random.randint(0, seed)
         random.seed(2024 + s)
+
+
+class AddGaussianNoise(object):
+    def __init__(self,device, mean=0., std=1.):
+        self.device = device
+        self.std = std
+        self.mean = mean
+
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()).to(self.device) * self.std + self.mean
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
