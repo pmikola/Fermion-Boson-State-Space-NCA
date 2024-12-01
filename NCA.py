@@ -26,10 +26,25 @@ class NCA(nn.Module):
         self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
+        self.act = nn.ELU(alpha=3.)
 
         self.nca_layers_odd = nn.ModuleList([
             nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=k, stride=1, padding=k // 2)
             for k in range(1, self.patch_size_x+2, 2 )
+        ])
+
+        self.NSC_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(6, 12),
+                nn.ELU(alpha=3.),
+                nn.Linear(12, 12),
+                nn.ELU(alpha=3.),
+                nn.Linear(12, 6),
+                nn.ELU(alpha=3.),
+                nn.Linear(6, 1),
+                nn.ELU(alpha=3.),
+            )
+            for _ in range(self.num_steps)
         ])
 
         self.nca_fusion = nn.Conv3d(in_channels=self.channels, out_channels=self.channels, kernel_size=1, stride=1, padding=0)
@@ -85,7 +100,6 @@ class NCA(nn.Module):
             nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.boson_number, self.channels, k, k, k), requires_grad=False))
                 for k in range(1,self.kernel_size+1,2)])
             for _ in range(num_steps)])
-        self.act = nn.ELU(alpha=3.)
         # self.act = nn.GELU()
         self.step_param = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
         self.spike_scale = nn.Parameter(torch.ones( self.num_steps), requires_grad=True)
@@ -100,7 +114,8 @@ class NCA(nn.Module):
         nca_var = torch.zeros((x.shape[0],self.num_steps), requires_grad=True).to(self.device)
         log_det_j_loss = torch.zeros((x.shape[0],self.num_steps), requires_grad=True).to(self.device)
         freq_loss = torch.zeros((self.fermion_kernels_size.shape[0],self.num_steps), requires_grad=True).to(self.device)
-
+        past_fermion_kernels = []
+        past_boson_kernels = []
         nca_out_odd = [self.act(layer(x)) for layer in self.nca_layers_odd]
         # if self.training:
         #     freq_loss_nca = torch.mean(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.nca_layers_odd],dim=0))
@@ -114,21 +129,31 @@ class NCA(nn.Module):
             if self.training:
                 #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0],self.channels**2, self.patch_size_x , self.patch_size_y)
+                # (self.boson_number, self.channels, k, k, k
+
                 cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
                 wavelet_space = self.wvl_layer_norm(cwt_wvl)
-
+                # print(wavelet_space.shape)
+                # time.sleep(1000)
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
-
                 boson_kernels = self.act(self.boson_features(wavelet_space))
-                #ortho_mean_b, ortho_max_b = self.validate_channel_orthogonality(boson_kernels)
-                #ortho_mean, ortho_max = ortho_mean_f+ortho_mean_b,ortho_max_f+ortho_max_b
+
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
                 boson_kernels = self.act(self.project_bosons_seq(boson_kernels)).permute(0, 2, 1)
                 fermion_kernels = self.act(self.project_fermions_feature(fermion_kernels))
+                past_fermion_kernels.append(fermion_kernels)
                 boson_kernels = self.act(self.project_bosons_feature(boson_kernels))
-                fermion_kernels = torch.mean(fermion_kernels,dim=0)
+                past_boson_kernels.append(boson_kernels)
+
+                fermion_quality = self.evaluate_kernel_quality(fermion_kernels,boson_kernels,past_fermion_kernels,i)
+                boson_quality = self.evaluate_kernel_quality(boson_kernels,fermion_kernels,past_boson_kernels,i)
+
+                fermion_kernels = fermion_kernels * fermion_quality
+                boson_kernels = boson_kernels * boson_quality
+
                 boson_kernels= torch.mean(boson_kernels,dim=0)
+                fermion_kernels = torch.mean(fermion_kernels, dim=0)
                 l_idx = 0
                 f_kernels = []
                 k_idx = 0
@@ -221,6 +246,110 @@ class NCA(nn.Module):
         ortho_mean = torch.mean(mean_off_diagonal)
         ortho_max = torch.mean(max_off_diagonal)
         return ortho_mean, ortho_max
+
+    def evaluate_kernel_quality(self, kernels,comm_kernels,past_kernels,i):
+        kernels = kernels.detach()
+        comm_kernels = comm_kernels.detach()
+
+        sparsity_score = torch.mean(torch.abs(kernels), dim=[1, 2]) / (torch.norm(kernels, dim=[1, 2], p=1) + 1e-6)
+        variance_score = torch.var(kernels, dim=[1, 2])
+        dif = self.directional_information_flow(kernels,comm_kernels)
+        E_c = self.energy_conservation(kernels,comm_kernels)
+        f_div = self.frequency_diversity(kernels)
+        if len(past_kernels) < 2:
+            mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
+        else:
+            mutual_info_score = self.mutual_information_score(kernels,past_kernels[-2].detach())
+        quality_score = torch.cat([
+                variance_score.unsqueeze(1),
+                f_div.unsqueeze(1),
+                E_c.unsqueeze(1),
+                mutual_info_score.unsqueeze(1),
+                dif.unsqueeze(1),
+                -sparsity_score.unsqueeze(1)
+        ],dim=1)
+        quality_score = self.NSC_layers[i](quality_score)
+        # print(quality_score.shape)
+        quality_score = torch.softmax(quality_score, dim=0).unsqueeze(1)
+        return quality_score
+
+    def mutual_information_score(self, input_tensor, output_tensor, num_bins=128):
+        batch_size = input_tensor.size(0)
+        input_flat = input_tensor.view(batch_size, -1)
+        output_flat = output_tensor.view(batch_size, -1)
+
+        min_val = torch.min(torch.cat([input_flat, output_flat], dim=1), dim=1).values
+        max_val = torch.max(torch.cat([input_flat, output_flat], dim=1), dim=1).values
+        bin_edges = torch.stack([
+            torch.linspace(min_val[i], max_val[i], steps=num_bins, device=input_tensor.device)
+            for i in range(batch_size)
+        ])
+
+        bin_widths = bin_edges[:, 1] - bin_edges[:, 0]
+
+        input_probs = torch.stack([
+            torch.exp(-0.5 * ((input_flat[i][:, None] - bin_edges[i]) / bin_widths[i]) ** 2)
+            for i in range(batch_size)
+        ])
+
+        output_probs = torch.stack([
+            torch.exp(-0.5 * ((output_flat[i][:, None] - bin_edges[i]) / bin_widths[i]) ** 2)
+            for i in range(batch_size)
+        ])
+
+        input_probs = input_probs / input_probs.sum(dim=2, keepdim=True)
+        output_probs = output_probs / output_probs.sum(dim=2, keepdim=True)
+
+        joint_probs = torch.stack([
+            torch.einsum('ij,ik->jk', input_probs[i], output_probs[i])
+            for i in range(batch_size)
+        ])
+        joint_probs /= joint_probs.sum(dim=(1, 2), keepdim=True)
+
+        # Marginal probabilities
+        input_marginal = joint_probs.sum(dim=2)
+        output_marginal = joint_probs.sum(dim=1)
+
+        joint_probs = joint_probs + 1e-10
+        input_marginal = input_marginal + 1e-10
+        output_marginal = output_marginal + 1e-10
+
+        mutual_info = torch.stack([
+            torch.sum(
+                joint_probs[i] * torch.log(joint_probs[i] / (input_marginal[i][:, None] * output_marginal[i][None, :]))
+            )
+            for i in range(batch_size)
+        ])
+
+        return mutual_info
+
+    def directional_information_flow(self, f_kernels, s_kernels):
+        f_energy = torch.norm(f_kernels, p=2, dim=[1,2])
+        s_energy = torch.norm(s_kernels, p=2, dim=[1,2])
+        similarity = f_energy * s_energy / (
+                torch.norm(f_energy) * torch.norm(s_energy) + 1e-6
+        )
+        return -similarity
+
+    def energy_conservation(self, initial_energy, transformed_energy):
+        energy_difference = torch.abs(torch.sum(transformed_energy, dim=[1,2]) - torch.sum(initial_energy, dim=[1,2]))
+        return -torch.log(1 + energy_difference)
+
+    def frequency_diversity(self, kernel):
+        fft_k = torch.fft.fftn(kernel, dim=[1,2])
+        spectrum = torch.abs(fft_k)
+        low_freq_energy = torch.mean(spectrum[..., :kernel.shape[-1] // 3], dim=[1,2])
+        mid_freq_energy = torch.mean(spectrum[..., kernel.shape[-1] // 3: 2 * kernel.shape[-1] // 3],dim=[1,2])
+        high_freq_energy = torch.mean(spectrum[..., 2 * kernel.shape[-1] // 3:],dim=[1,2])
+
+        diversity_score = 1.0 / (torch.abs(low_freq_energy - mid_freq_energy) +
+                                 torch.abs(mid_freq_energy - high_freq_energy) + 1e-6)
+        return diversity_score
+
+    def temporal_stability(self, states):
+        temporal_differences = [torch.norm(states[i] - states[i - 1], p=2) for i in range(1, len(states))]
+        stability_score = torch.mean(torch.stack(temporal_differences))
+        return -stability_score
 
 
 class FermionConvLayer(nn.Module):

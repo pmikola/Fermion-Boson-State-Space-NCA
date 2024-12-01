@@ -133,9 +133,9 @@ class teacher(nn.Module):
                         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                     ])
 
-        self.validator = torch.hub.load(repo_or_dir="miccunifi/ARNIQA", source="github", model="ARNIQA",
-                               regressor_dataset="kadid10k")
-        self.validator.eval().to(device)
+        # self.validator = torch.hub.load(repo_or_dir="miccunifi/ARNIQA", source="github", model="ARNIQA",
+        #                        regressor_dataset="kadid10k")
+        # self.validator.eval().to(device)
 
 
     def generate_structure(self):
@@ -1322,7 +1322,7 @@ class teacher(nn.Module):
 
                 t_epoch_stop = time.perf_counter()
                 t_epoch += (t_epoch_stop - t_epoch_start)
-                if self.cpu_temp[-1] > 90 or self.gpu_temp[-1] > 75:
+                if self.cpu_temp[-1] > 100 or self.gpu_temp[-1] > 75:
                     print('too hot! lets cool down a little bit')
                     torch.cuda.synchronize()
                     time.sleep(2)
@@ -1709,7 +1709,7 @@ class teacher(nn.Module):
                                 log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
                                 boundary_loss.mean()*5e-1 * model.L.unsqueeze(0) ,
                                 hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) ,
-                                #freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
+                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
                                ],dim=0)
         #print(final_loss.tolist())
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
@@ -1731,10 +1731,10 @@ class teacher(nn.Module):
 
 
     def boundary_loss(self,pred, target):
-        grad_pred_h = torch.abs(pred[:,  0:2, :] - pred[:,  -3:-1, :])
-        grad_pred_w = torch.abs(pred[:,  :, 0:2] - pred[:,  :, -3:-1])
-        grad_target_h = torch.abs(target[:,  0:2, :] - target[:, -3:-1, :])
-        grad_target_w = torch.abs(target[:,  :, 0:2] - target[:,  :, -3:-1])
+        grad_pred_h = torch.abs(pred[:,  0:1, :] - pred[:,  -2:-1, :])
+        grad_pred_w = torch.abs(pred[:,  :, 0:1] - pred[:,  :, -2:-1])
+        grad_target_h = torch.abs(target[:,  0:1, :] - target[:, -2:-1, :])
+        grad_target_w = torch.abs(target[:,  :, 0:1] - target[:,  :, -2:-1])
         boundary_h = torch.abs(grad_pred_h - grad_target_h).mean()
         boundary_w = torch.abs(grad_pred_w - grad_target_w).mean()
         return boundary_h + boundary_w
@@ -1744,7 +1744,7 @@ class teacher(nn.Module):
         tv_w = torch.abs(pred[:,  :, 1:] - pred[:,  :, :-1]).mean()
         return tv_h + tv_w
 
-    def fft_high_frequency_loss(self, pred, target, cutoff_ratio=0.8):
+    def fft_high_frequency_loss(self, pred, target, cutoff_ratio=0.7):
         B, H, W = pred.shape
         fft_pred = torch.fft.fft2(pred, dim=(-2, -1))
         fft_target = torch.fft.fft2(target, dim=(-2, -1))

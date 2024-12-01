@@ -1,3 +1,5 @@
+import time
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -22,7 +24,7 @@ class WaveletModel(nn.Module):
 
     def wavelet(self,t, f,i):
         # Note : Real Valued Morlet Wavelet
-        sigma = self.f_mod[i] / (2 * torch.pi * f)
+        sigma = (self.f_mod[i] / (2 * torch.pi * f)).clamp(min=1e-6)
         base_real = torch.cos(2 * torch.pi * f * t)
         base_imag = torch.sin(2 * torch.pi * f * t)
         real_part = (
@@ -52,12 +54,13 @@ class WaveletModel(nn.Module):
         imag_wavelet = imag_part * gauss_window
 
         amp = real_wavelet + imag_wavelet
-        scaled_amp = amp / torch.norm(amp)#3.0
+        scaled_amp = amp / torch.norm(amp)
         phase = torch.atan2(imag_wavelet, real_wavelet)
-        sin_component = scaled_amp * torch.sin(phase)*self.phase_mod[i,0]
-        cos_component = scaled_amp * torch.cos(phase)*self.phase_mod[i,1]
+        #modulated_phase = phase * torch.exp(-self.phase_mod[i, 0]) + torch.sin(self.phase_mod[i, 1] * phase)
+        sin_component = scaled_amp * torch.sin(phase)* self.phase_mod[i, 0]
+        cos_component = scaled_amp * torch.cos(phase)* self.phase_mod[i, 1]
         sinc_component = scaled_amp * torch.sinc(phase / torch.pi) * self.phase_mod[i, 2]
-        wavelet = torch.abs(sin_component * cos_component * sinc_component)
+        wavelet = sin_component * cos_component * sinc_component
         return wavelet
 
     def cwt(self,x, scales,i, device="cuda"):
