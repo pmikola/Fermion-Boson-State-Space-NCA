@@ -26,7 +26,7 @@ class NCA(nn.Module):
         self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
-        self.act = nn.ELU(alpha=3.)
+        self.act = nn.ELU(alpha=1.)
 
         self.nca_layers_odd = nn.ModuleList([
             nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=k, stride=1, padding=k // 2)
@@ -35,14 +35,14 @@ class NCA(nn.Module):
 
         self.NSC_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(6, 12),
-                nn.ELU(alpha=3.),
+                nn.Linear(5, 12),
+                nn.ELU(alpha=1.),
                 nn.Linear(12, 12),
-                nn.ELU(alpha=3.),
+                nn.ELU(alpha=1.),
                 nn.Linear(12, 6),
-                nn.ELU(alpha=3.),
+                nn.ELU(alpha=1.),
                 nn.Linear(6, 1),
-                nn.ELU(alpha=3.),
+                #nn.ELU(alpha=1.),
             )
             for _ in range(self.num_steps)
         ])
@@ -253,25 +253,46 @@ class NCA(nn.Module):
 
         sparsity_score = torch.mean(torch.abs(kernels), dim=[1, 2]) / (torch.norm(kernels, dim=[1, 2], p=1) + 1e-6)
         variance_score = torch.var(kernels, dim=[1, 2])
-        dif = self.directional_information_flow(kernels,comm_kernels)
+        #dif = self.directional_information_flow(kernels,comm_kernels)
         E_c = self.energy_conservation(kernels,comm_kernels)
-        f_div = self.frequency_diversity(kernels)
+        #f_div = self.frequency_diversity(kernels)
+        spatial_coherence = self.spatial_coherence(kernels)
         if len(past_kernels) < 2:
-            mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
+            #mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
+            temp_coherence = torch.full_like(variance_score,0.,requires_grad=False)
+
         else:
-            mutual_info_score = self.mutual_information_score(kernels,past_kernels[-2].detach())
+            #mutual_info_score = self.mutual_information_score(kernels,past_kernels[-2].detach())
+            temp_coherence = self.temporal_coherence(kernels, past_kernels[-2].detach())
         quality_score = torch.cat([
-                variance_score.unsqueeze(1),
-                f_div.unsqueeze(1),
-                E_c.unsqueeze(1),
-                mutual_info_score.unsqueeze(1),
-                dif.unsqueeze(1),
-                -sparsity_score.unsqueeze(1)
+                0.5*variance_score.unsqueeze(1),
+                0.5*temp_coherence.unsqueeze(1),
+                #0.5*spatial_coherence.unsqueeze(1),
+                #f_div.unsqueeze(1),
+                0.5*E_c.unsqueeze(1),
+                #-0.5*mutual_info_score.unsqueeze(1),
+                #dif.unsqueeze(1),
+                -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
-        quality_score = self.NSC_layers[i](quality_score)
+        #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
-        quality_score = torch.softmax(quality_score, dim=0).unsqueeze(1)
+        quality_score = torch.sum(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
+        # print(quality_score.shape)
         return quality_score
+
+    def temporal_coherence(self,f_kernels,s_kernels):
+        dot_product = torch.sum(f_kernels*s_kernels,dim=[1,2])
+        norm1 = torch.sqrt(torch.sum(f_kernels ** 2,dim=[1,2]))
+        norm2 = torch.sqrt(torch.sum(s_kernels ** 2,dim=[1,2]))
+        temporal_coherence = dot_product / (norm1 * norm2 + 1e-8)
+        return temporal_coherence
+
+    def spatial_coherence(self,kernels):
+        mean_per_channel = torch.mean(kernels, dim=[1,2], keepdim=True)
+        deviation = kernels - mean_per_channel
+        variance = torch.mean(deviation ** 2, dim=[1,2])
+        spatial_coherence = 1 / (variance + 1e-8)
+        return spatial_coherence
 
     def mutual_information_score(self, input_tensor, output_tensor, num_bins=128):
         batch_size = input_tensor.size(0)
@@ -306,7 +327,6 @@ class NCA(nn.Module):
         ])
         joint_probs /= joint_probs.sum(dim=(1, 2), keepdim=True)
 
-        # Marginal probabilities
         input_marginal = joint_probs.sum(dim=2)
         output_marginal = joint_probs.sum(dim=1)
 
@@ -361,7 +381,7 @@ class FermionConvLayer(nn.Module):
         self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
-        self.act = nn.ELU(alpha=3.)
+        self.act = nn.ELU(alpha=1.)
         self.kernel_size= kernel_size
 
     def normalizing_flow_loss(self,z, log_det_jacobian):
@@ -395,7 +415,7 @@ class BosonConvLayer(nn.Module):
         self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
-        self.act = nn.ELU(alpha=3.)
+        self.act = nn.ELU(alpha=1.)
         self.kernel_size = kernel_size
 
     def normalizing_flow_loss(self,z, log_det_jacobian):

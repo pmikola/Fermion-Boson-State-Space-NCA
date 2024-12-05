@@ -30,7 +30,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.cross_correlate_in = nn.Conv3d(in_channels=1, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.cross_correlate_out = nn.Conv3d(in_channels=self.hdc_dim, out_channels=self.hdc_dim, kernel_size=3, stride=1, padding=1)
         self.nca_steps = nca_steps
-        self.act = nn.ELU(alpha=3.0)
+        self.act = nn.ELU(alpha=1.0)
         self.A, self.B, self.C, self.D, self.E, self.F, self.G, self.H, self.I, self.J, self.K, self.L, self.M, self.N = torch.nn.Parameter(torch.full((14,),1.),requires_grad=True).to(self.device)
 
         # self.act = nn.GELU()

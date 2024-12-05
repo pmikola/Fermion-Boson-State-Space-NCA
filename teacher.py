@@ -1458,29 +1458,29 @@ class teacher(nn.Module):
 
 
         # NOTE: Firs order difference
-        # diff_r_true = r_out - r_in
-        # diff_r_pred = pred_r - r_in
-        # loss_diff_r = criterion(t * diff_r_pred + t_1 * diff_r_true, diff_r_true)
-        #
-        # diff_g_true = g_out - g_in
-        # diff_g_pred = pred_g - g_in
-        # loss_diff_g = criterion(t * diff_g_pred + t_1 * diff_g_true, diff_g_true)
-        # diff_b_true = b_out - b_in
-        # diff_b_pred = pred_b - b_in
-        # loss_diff_b = criterion(t * diff_b_pred + t_1 * diff_b_true, diff_b_true)
-        # diff_a_true = a_out - a_in
-        # diff_a_pred = pred_a - a_in
-        # loss_diff_a = criterion(t * diff_a_pred + t_1 * diff_a_true, diff_a_true)
-        # diff_s_true = s_out - s_in
-        # diff_s_pred = pred_s - s_in
-        # loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
-        #
-        # r_loss = torch.mean(loss_diff_r, dim=[1, 2])
-        # g_loss = torch.mean(loss_diff_g, dim=[1, 2])
-        # b_loss = torch.mean(loss_diff_b, dim=[1, 2])
-        # a_loss = torch.mean(loss_diff_a, dim=[1, 2])
-        # s_loss = torch.mean(loss_diff_s, dim=[1, 2])
-        # diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s)
+        diff_r_true = r_out - r_in
+        diff_r_pred = pred_r - r_in
+        loss_diff_r = criterion(t * diff_r_pred + t_1 * diff_r_true, diff_r_true)
+
+        diff_g_true = g_out - g_in
+        diff_g_pred = pred_g - g_in
+        loss_diff_g = criterion(t * diff_g_pred + t_1 * diff_g_true, diff_g_true)
+        diff_b_true = b_out - b_in
+        diff_b_pred = pred_b - b_in
+        loss_diff_b = criterion(t * diff_b_pred + t_1 * diff_b_true, diff_b_true)
+        diff_a_true = a_out - a_in
+        diff_a_pred = pred_a - a_in
+        loss_diff_a = criterion(t * diff_a_pred + t_1 * diff_a_true, diff_a_true)
+        diff_s_true = s_out - s_in
+        diff_s_pred = pred_s - s_in
+        loss_diff_s = criterion(t * diff_s_pred + t_1 * diff_s_true, diff_s_true)
+
+        r_loss = torch.mean(loss_diff_r, dim=[1, 2])
+        g_loss = torch.mean(loss_diff_g, dim=[1, 2])
+        b_loss = torch.mean(loss_diff_b, dim=[1, 2])
+        a_loss = torch.mean(loss_diff_a, dim=[1, 2])
+        s_loss = torch.mean(loss_diff_s, dim=[1, 2])
+        diff_loss = torch.mean(loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s)
         # diff_loss = loss_diff_r + loss_diff_g + loss_diff_b + loss_diff_a + loss_diff_s
 
         # Note: Fourier loss
@@ -1631,7 +1631,7 @@ class teacher(nn.Module):
         kl_loss_s = f.kl_div(pred_distribution_s+target_distribution_s_w, target_distribution_s, reduction="sum", log_target=False)
 
         # Combine the separate KL divergence losses if desired
-        #kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
+        kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
 
         r_loss += kl_loss_r
         g_loss += kl_loss_g
@@ -1696,13 +1696,13 @@ class teacher(nn.Module):
 
         final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
                                 torch.abs((disc_loss.mean().unsqueeze(0)**2)-(disc_loss.mean().unsqueeze(0))+(0.5**2))*20,
-                                #entropy_loss.mean().unsqueeze(0)*1e-1 * model.B.unsqueeze(0) ,
+                                entropy_loss.mean().unsqueeze(0)*1e-1 * model.B.unsqueeze(0) ,
                                 grad_penalty.mean().unsqueeze(0) * 2e-2 ,
-                                #kl_loss.mean().unsqueeze(0)*1e-6 * model.C.unsqueeze(0) ,
+                                kl_loss.mean().unsqueeze(0)*1e-6 * model.C.unsqueeze(0) ,
                                 sink_loss.mean().unsqueeze(0)*2e-1 * model.D.unsqueeze(0) ,
                                 diff_fft_loss.mean().unsqueeze(0)*1e3 * model.E.unsqueeze(0) ,
                                 critical_loss.mean().unsqueeze(0)*2e-1 * model.F.unsqueeze(0) ,
-                                #diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) ,
+                                diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) ,
                                 fft_loss.mean().unsqueeze(0)*5e3 * model.H.unsqueeze(0) ,
                                 model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) ,
                                 ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
@@ -1715,9 +1715,9 @@ class teacher(nn.Module):
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
         return (torch.mean(final_loss),
                 model.A*2*vsi_loss ,
-                model.B,#*entropy_loss,
+                model.B*entropy_loss*1e-1,
                 grad_penalty* 2e-2 ,
-                model.C,#*1e-6*kl_loss,
+                model.C*1e-6*kl_loss,
                 sink_loss* model.D*2e-1,
                 critical_loss* model.F*2e-1,
                 hf_e_loss* model.M*5e-1,
@@ -1725,7 +1725,7 @@ class teacher(nn.Module):
                 2e1*value_loss* model.I,
                 diff_fft_loss* model.E*1e3,
                 fft_loss* model.H*5e3,
-                model.G,#*1e1*diff_loss*,
+                model.G*1e1*diff_loss,
                 log_det_jacobian_loss.mean()* model.K*1e-6,
                 model.N*freq_loss.mean()*1e-3)
 
@@ -1792,8 +1792,10 @@ class teacher(nn.Module):
             fft_data_shifted = torch.fft.fftshift(fft_data, dim=(-2, -1))
             mask = torch.zeros((H, W ), device=self.device)
             center_x, center_y = (H-1) // 2, (W-1) // 2
-            epoch_fraction = (1+self.epoch) / (1+self.num_of_epochs)
+            epoch_fraction = 2*(1+self.epoch) / (1+self.num_of_epochs)
             cutoff_ratio = 0.1 + 0.9 * epoch_fraction
+            if cutoff_ratio > 1.:
+                return data
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
             if hf_flag < cutoff_ratio:
