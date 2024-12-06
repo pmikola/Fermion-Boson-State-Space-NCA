@@ -1,16 +1,24 @@
 import time
 
+import matplotlib
+import numpy as np
 import torch
 from linformer import Linformer
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, animation
 from scipy.constants import fermi
 from torch import nn
 from WaveletModel import WaveletModel
 from torch.nn.utils import spectral_norm as sn
-
+matplotlib.use('TkAgg')
 class NCA(nn.Module):
     def __init__(self,batch_size, channels, num_steps, device):
         super(NCA, self).__init__()
+
+        self.fig = plt.figure(figsize=(6, 6))
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.ims = []
+        self.cbar = None
+
         self.batch_size = batch_size
         self.device = device
         self.num_steps =num_steps
@@ -21,12 +29,13 @@ class NCA(nn.Module):
         self.patch_size_y = 15
         self.channels = channels
         self.kernel_size = 3
-        self.wavelet_scales = 5
+        self.wavelet_scales = 7
         self.max_wavelet_scale = 20
         self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.act = nn.ELU(alpha=1.)
+
 
         self.nca_layers_odd = nn.ModuleList([
             nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=k, stride=1, padding=k // 2)
@@ -77,7 +86,7 @@ class NCA(nn.Module):
             share_kv=False,
             reversible=True,
             dropout=0.00,
-            k=self.channels*self.fermion_number*self.wavelet_scales
+            k=self.channels*self.boson_number*self.wavelet_scales
         )
 
         self.project_fermions_seq = nn.Conv1d( self.patch_size_x * self.patch_size_y, self.fermion_number  * torch.sum(self.fermion_kernels_size**3)*self.channels,kernel_size=3,padding=1)
@@ -133,8 +142,7 @@ class NCA(nn.Module):
 
                 cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
                 wavelet_space = self.wvl_layer_norm(cwt_wvl)
-                # print(wavelet_space.shape)
-                # time.sleep(1000)
+
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 boson_kernels = self.act(self.boson_features(wavelet_space))
@@ -154,6 +162,7 @@ class NCA(nn.Module):
 
                 boson_kernels= torch.mean(boson_kernels,dim=0)
                 fermion_kernels = torch.mean(fermion_kernels, dim=0)
+
                 l_idx = 0
                 f_kernels = []
                 k_idx = 0
@@ -198,6 +207,7 @@ class NCA(nn.Module):
                         self.learned_fermion_kernels[i][j].copy_(f_kernels[j])
                     for j in range(0, len(self.learned_boson_kernels[i])):
                         self.learned_boson_kernels[i][j].copy_(b_kernels[j])
+
             else:
                 f_kernels = self.learned_fermion_kernels[i]
                 b_kernels = self.learned_boson_kernels[i]
@@ -209,11 +219,82 @@ class NCA(nn.Module):
 
                 nca_var, ortho_mean, ortho_max,log_det_j_loss ,freq_loss= None,None,None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
+        self.draw_neural_space(self.learned_boson_kernels)
+        # self.ims.append([k_1_anim])
+        # animation.ArtistAnimation(self.fig, self.ims, interval=1, blit=True, repeat_delay=100)
+        # plt.show()
         return energy_spectrum,nca_var,ortho_mean,ortho_max,log_det_j_loss,freq_loss
 
     def forward(self, x,meta_embeddings,spiking_probabilities,hf_data,batch_size):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
+
+    def draw_neural_space(self,kernels):
+        self.ax.clear()
+        k_1 = []
+        k_3 = []
+        for i in range(0, len(kernels)):
+            for j in range(0, len(kernels[i])):
+                if kernels[i][j].shape[-1] == 1:
+                    k_1.append(kernels[i][j])
+                else:
+                    k_3.append(kernels[i][j])
+        #k_1 = torch.stack(k_1)
+        k_3 = torch.stack(k_3)
+       # print(k_3.shape)
+        #print(k_1.reshape(self.num_steps, 5, 5))
+        #k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        x, y, z = np.meshgrid(
+            np.arange(k_3_nparray.shape[0]),
+            np.arange(k_3_nparray.shape[1]),
+            np.arange(k_3_nparray.shape[2]),
+            indexing="ij"
+        )
+
+        dx = dy = dz = 0.5
+        x_flat = x.flatten()
+        y_flat = y.flatten()
+        z_flat = z.flatten()
+        norm_data = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
+        #colors = plt.cm.viridis(norm_data.flatten())
+        colors = plt.cm.viridis(norm_data.flatten())  # Get colors based on normalized data
+        colors[:, -1] = 0.5
+
+        if hasattr(self, 'bars'):
+            for bar in self.bars:
+                bar.remove()
+        if hasattr(self, 'cbar') and self.cbar is not None:
+            self.cbar.remove()
+
+        # if self.cbar is not None:
+        #     self.cbar.remove()
+        # self.ax.bar3d(
+        #     x_flat - dx / 2,
+        #     y_flat - dy / 2,
+        #     z_flat - dz / 2,
+        #     dx, dy, dz,
+        #     color=colors,
+        #     shade=True
+        # )
+        scatter = self.ax.scatter(
+            x_flat,
+            y_flat,
+            z_flat,
+            c=norm_data.flatten(),
+            cmap="plasma",
+            s=25,
+            alpha=0.7
+        )
+        # mappable = plt.cm.ScalarMappable(cmap="viridis")
+        # mappable.set_array(norm_data)
+        # self.cbar = plt.colorbar(mappable, ax=self.ax, shrink=0.5, aspect=10)
+        # self.cbar.set_label('Intensity', rotation=270, labelpad=15)
+        self.fig.canvas.draw()
+        plt.pause(0.01)
+       # time.sleep(1000)
+
+
 
     def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
         C,HDC, H, W, D = kernels.shape

@@ -48,7 +48,8 @@ class WaveletModel(nn.Module):
         )
 
         exp_dec_2 = torch.exp(-t ** 2 / (2 * sigma ** 2))
-        gauss_window =  self.exp_mod[i,0]*exp_dec_2
+        exp_dec_3 = torch.exp(-t ** 3 / (2 * sigma ** 3))
+        gauss_window =  self.exp_mod[i,0]*(exp_dec_2+exp_dec_3)
 
         real_wavelet = real_part * gauss_window
         imag_wavelet = imag_part * gauss_window
@@ -65,7 +66,7 @@ class WaveletModel(nn.Module):
 
     def cwt(self,x, scales,i, device="cuda"):
         fdim = x.shape[1]
-        x= x.flatten(start_dim=2)#.type(torch.complex64)
+        x= x.flatten(start_dim=2)
         space_steps = torch.arange(x.shape[-1], device=device)
         wavelets = torch.stack([self.wavelet(space_steps, 1.0 / scale,i).unsqueeze(0) for scale in self.scales]).to(device).repeat(fdim,1,1)
         x = x.repeat(1,len(scales),1)
