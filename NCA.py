@@ -13,12 +13,6 @@ matplotlib.use('TkAgg')
 class NCA(nn.Module):
     def __init__(self,batch_size, channels, num_steps, device):
         super(NCA, self).__init__()
-
-        self.fig = plt.figure(figsize=(6, 6))
-        self.ax = self.fig.add_subplot(111, projection='3d')
-        self.ims = []
-        self.cbar = None
-
         self.batch_size = batch_size
         self.device = device
         self.num_steps =num_steps
@@ -36,10 +30,16 @@ class NCA(nn.Module):
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.act = nn.ELU(alpha=1.)
 
+        # self.fig3d = plt.figure(figsize=(6, 6))
+        # self.ax3d = self.fig3d.add_subplot(111, projection='3d')
+        self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(12, 7))
+
+        self.ims = []
+        self.cbar = None
 
         self.nca_layers_odd = nn.ModuleList([
             nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=k, stride=1, padding=k // 2)
-            for k in range(1, self.patch_size_x+2, 2 )
+            for k in range(1, self.patch_size_x+2, 2)
         ])
 
         self.NSC_layers = nn.ModuleList([
@@ -159,7 +159,6 @@ class NCA(nn.Module):
 
                 fermion_kernels = fermion_kernels * fermion_quality
                 boson_kernels = boson_kernels * boson_quality
-
                 boson_kernels= torch.mean(boson_kernels,dim=0)
                 fermion_kernels = torch.mean(fermion_kernels, dim=0)
 
@@ -219,80 +218,14 @@ class NCA(nn.Module):
 
                 nca_var, ortho_mean, ortho_max,log_det_j_loss ,freq_loss= None,None,None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
-        self.draw_neural_space(self.learned_boson_kernels)
-        # self.ims.append([k_1_anim])
-        # animation.ArtistAnimation(self.fig, self.ims, interval=1, blit=True, repeat_delay=100)
-        # plt.show()
+        if self.training:
+            self.draw_neural_space_in_2d(self.learned_fermion_kernels,self.learned_boson_kernels,fermionic_response*fermion_quality.unsqueeze(1).unsqueeze(2),bosonic_response*boson_quality.unsqueeze(1).unsqueeze(2))
+
         return energy_spectrum,nca_var,ortho_mean,ortho_max,log_det_j_loss,freq_loss
 
     def forward(self, x,meta_embeddings,spiking_probabilities,hf_data,batch_size):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
-
-    def draw_neural_space(self,kernels):
-        self.ax.clear()
-        k_1 = []
-        k_3 = []
-        for i in range(0, len(kernels)):
-            for j in range(0, len(kernels[i])):
-                if kernels[i][j].shape[-1] == 1:
-                    k_1.append(kernels[i][j])
-                else:
-                    k_3.append(kernels[i][j])
-        #k_1 = torch.stack(k_1)
-        k_3 = torch.stack(k_3)
-       # print(k_3.shape)
-        #print(k_1.reshape(self.num_steps, 5, 5))
-        #k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
-        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
-        x, y, z = np.meshgrid(
-            np.arange(k_3_nparray.shape[0]),
-            np.arange(k_3_nparray.shape[1]),
-            np.arange(k_3_nparray.shape[2]),
-            indexing="ij"
-        )
-
-        dx = dy = dz = 0.5
-        x_flat = x.flatten()
-        y_flat = y.flatten()
-        z_flat = z.flatten()
-        norm_data = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
-        #colors = plt.cm.viridis(norm_data.flatten())
-        colors = plt.cm.viridis(norm_data.flatten())  # Get colors based on normalized data
-        colors[:, -1] = 0.5
-
-        if hasattr(self, 'bars'):
-            for bar in self.bars:
-                bar.remove()
-        if hasattr(self, 'cbar') and self.cbar is not None:
-            self.cbar.remove()
-
-        # if self.cbar is not None:
-        #     self.cbar.remove()
-        # self.ax.bar3d(
-        #     x_flat - dx / 2,
-        #     y_flat - dy / 2,
-        #     z_flat - dz / 2,
-        #     dx, dy, dz,
-        #     color=colors,
-        #     shade=True
-        # )
-        scatter = self.ax.scatter(
-            x_flat,
-            y_flat,
-            z_flat,
-            c=norm_data.flatten(),
-            cmap="plasma",
-            s=25,
-            alpha=0.7
-        )
-        # mappable = plt.cm.ScalarMappable(cmap="viridis")
-        # mappable.set_array(norm_data)
-        # self.cbar = plt.colorbar(mappable, ax=self.ax, shrink=0.5, aspect=10)
-        # self.cbar.set_label('Intensity', rotation=270, labelpad=15)
-        self.fig.canvas.draw()
-        plt.pause(0.01)
-       # time.sleep(1000)
 
 
 
@@ -451,6 +384,225 @@ class NCA(nn.Module):
         temporal_differences = [torch.norm(states[i] - states[i - 1], p=2) for i in range(1, len(states))]
         stability_score = torch.mean(torch.stack(temporal_differences))
         return -stability_score
+
+
+    def draw_neural_space_in_2d(self,f_kernels,b_kernels,e1,e2):
+        for ax_row in self.axs2d:
+            for ax in ax_row:
+                ax.clear()
+        cmap_diff = 'RdBu'
+        cmap_org = 'plasma'
+        e1 = e1.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
+        e2 = e2.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
+        k_1 = []
+        k_3 = []
+        for i in range(0, len(f_kernels)):
+            for j in range(0, len(f_kernels[i])):
+                if f_kernels[i][j].shape[-1] == 1:
+                    k_1.append(f_kernels[i][j])
+                else:
+                    k_3.append(f_kernels[i][j])
+        k_1 = torch.stack(k_1)
+        k_3 = torch.stack(k_3)
+        k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
+        norm_data_k3 = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
+        k = 0
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[0, step]
+            ax.imshow(e1[k], cmap=cmap_org, origin="lower")
+            #ax.set_title(f"Step {step}")
+            k+=1
+        k=0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[0,step]
+            if step == 0:
+                ax.imshow(e1[k], cmap=cmap_org, origin="lower")
+                #ax.set_title(f"Step {step}")
+            else:
+                diff = np.abs(e1[k] - e1[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+        k = 0
+
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[1, step]
+            ax.imshow(norm_data_k1[k], cmap=cmap_org, origin="lower")
+            #ax.set_title(f"Step {step}")
+            k+=1
+        k=0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[1,step]
+            if step == 0:
+                ax.imshow(norm_data_k1[k], cmap=cmap_org, origin="lower")
+                #ax.set_title(f"Step {step}")
+            else:
+                diff = np.abs(norm_data_k1[k] - norm_data_k1[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+        k = 0
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[2, step]
+            ax.imshow(norm_data_k3[k], cmap=cmap_org, origin="lower")
+            #ax.set_title(f"Original Step {step}")
+            k += 1
+        k = 0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[2,step]
+            if step == 0:
+                ax.imshow(norm_data_k3[k], cmap=cmap_org, origin="lower")
+                #ax.set_title(f"Step {step}")
+            else:
+                diff  = np.abs(norm_data_k3[k] - norm_data_k3[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+
+        for ax_row in self.axs2d:
+            for a in ax_row:
+                a.set_xticklabels([])
+                a.set_yticklabels([])
+                a.set_aspect('equal')
+
+        k_1 = []
+        k_3 = []
+        for i in range(0, len(b_kernels)):
+            for j in range(0, len(b_kernels[i])):
+                if b_kernels[i][j].shape[-1] == 1:
+                    k_1.append(b_kernels[i][j])
+                else:
+                    k_3.append(b_kernels[i][j])
+        k_1 = torch.stack(k_1)
+        k_3 = torch.stack(k_3)
+        k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
+        norm_data_k3 = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
+
+        k=0
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[3, step]
+            ax.imshow(e2[k], cmap=cmap_org, origin="lower")
+            #ax.set_title(f"Step {step}")
+            k+=1
+        k=0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[3,step]
+            if step == 0:
+                ax.imshow(e2[k], cmap=cmap_org, origin="lower")
+                #ax.set_title(f"Step {step}")
+            else:
+                diff = np.abs(e2[k] - e2[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+        k = 0
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[4, step]
+            ax.imshow(norm_data_k1[k], cmap=cmap_org, origin="lower")
+            #ax.set_title(f"Step {step}")
+            k += 1
+        k = 0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[4, step]
+            if step == 0:
+                ax.imshow(norm_data_k1[k], cmap=cmap_org, origin="lower")
+                # ax.set_title(f"Step {step}")
+            else:
+                diff = np.abs(norm_data_k1[k] - norm_data_k1[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+        k = 0
+        for step in range(0,self.num_steps*2,2):
+            ax = self.axs2d[5, step]
+            ax.imshow(norm_data_k3[k], cmap=cmap_org, origin="lower")
+            # ax.set_title(f"Original Step {step}")
+            k += 1
+        k = 0
+        for step in range(1,self.num_steps*2,2):
+            ax = self.axs2d[5, step]
+            if step == 0:
+                ax.imshow(norm_data_k3[k], cmap=cmap_org, origin="lower")
+                # ax.set_title(f"Step {step}")
+            else:
+                diff = np.abs(norm_data_k3[k] - norm_data_k3[k - 1])
+                diff = 1 - (diff / np.max(diff))
+                ax.imshow(diff, cmap=cmap_diff, origin="lower")
+            k += 1
+
+        for ax_row in self.axs2d:
+            for a in ax_row:
+                a.set_xticklabels([])
+                a.set_yticklabels([])
+                a.set_aspect('equal')
+
+        self.fig2d.canvas.draw()
+        plt.pause(0.01)
+       # time.sleep(1000)
+
+    def draw_neural_space_in_3d(self,kernels):
+        self.ax3d.clear()
+        k_1 = []
+        k_3 = []
+        for i in range(0, len(kernels)):
+            for j in range(0, len(kernels[i])):
+                if kernels[i][j].shape[-1] == 1:
+                    k_1.append(kernels[i][j])
+                else:
+                    k_3.append(kernels[i][j])
+        #k_1 = torch.stack(k_1)
+        k_3 = torch.stack(k_3)
+       # print(k_3.shape)
+        #print(k_1.reshape(self.num_steps, 5, 5))
+        #k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        x, y, z = np.meshgrid(
+            np.arange(k_3_nparray.shape[0]),
+            np.arange(k_3_nparray.shape[1]),
+            np.arange(k_3_nparray.shape[2]),
+            indexing="ij"
+        )
+        dx = dy = dz = 1.
+        x_flat = x.flatten()
+        y_flat = y.flatten()
+        z_flat = z.flatten()
+        norm_data = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
+        colors = plt.cm.viridis(norm_data.flatten())
+        colors[:, -1] = 0.01
+
+        if hasattr(self, 'bars'):
+            for bar in self.bars:
+                bar.remove()
+        if hasattr(self, 'cbar') and self.cbar is not None:
+            self.cbar.remove()
+
+        # if self.cbar is not None:
+        #     self.cbar.remove()
+        # self.ax.bar3d(
+        #     x_flat - dx / 2,
+        #     y_flat - dy / 2,
+        #     z_flat - dz / 2,
+        #     dx, dy, dz,
+        #     color=colors,
+        #     shade=True
+        # )
+        scatter = self.ax3d.scatter(
+            x_flat,
+            y_flat,
+            z_flat,
+            c=norm_data.flatten(),
+            cmap="plasma",
+            s=25,
+            alpha=0.7
+        )
+        self.fig3d.canvas.draw()
+        plt.pause(0.01)
+
+
 
 
 class FermionConvLayer(nn.Module):

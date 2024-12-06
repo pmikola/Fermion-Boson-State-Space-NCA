@@ -5,6 +5,8 @@ import random
 import struct
 import time
 from statistics import mean
+
+import matplotlib
 from piq import VSILoss
 from torch import nn
 import gpustat
@@ -28,6 +30,7 @@ class teacher(nn.Module):
     def __init__(self, model,discriminator, device):
         super(teacher, self).__init__()
         #self.t = None
+        self.mpl_backend = plt.get_backend()
         self.validation_dataset = None
         self.max_seed = int(1e2)
         self.model = model
@@ -518,6 +521,11 @@ class teacher(nn.Module):
             self.noise_diff_out = torch.stack(noise_var_out, dim=0).to(self.device)
 
     def examine(self, criterion, device, plot=0):
+        matplotlib.use(self.mpl_backend)
+        del self.model.NCA.axs2d
+        del self.model.NCA.fig2d
+        plt.ioff()
+        plt.close('all')
         self.model.load_state_dict(torch.load('model.pt'))
         # self.model.NCA.fermion_features = None
         # self.model.NCA.boson_features = None
@@ -849,6 +857,7 @@ class teacher(nn.Module):
         plt.show()
 
     def visualize_lerning(self, poly_degree=3):
+        plt.close('all')
         plt.plot(self.train_loss, color='blue',label='train')
         plt.plot(self.val_loss, color='orange',label='test')
         plt.plot(np.array(torch.tensor(self.disc_loss).cpu()), color='red', label='disc')
