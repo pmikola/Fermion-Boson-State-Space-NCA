@@ -256,16 +256,20 @@ class teacher(nn.Module):
             noise_flag = torch.randint(low=0, high=10, size=(1,))
             # Note: Below is the pseudo diffusion process
             if create_val_dataset == 1:
-                noise_mod = 0.
+                #noise_mod = 0.
+                noise_power_in = torch.zeros(1)  # torch.rand(size=(1,))
+                noise_power_out = torch.zeros(1)
             else:
-                noise_mod = 0.1
+                #noise_mod = 1.
+                noise_power_in =  torch.randint(1, 20, size=(1,))#torch.rand(size=(1,))
+                noise_power_out = noise_power_in-1#torch.randint(0, 20, size=(1,))
             if noise_flag < 5:
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
                 noise_variance_in_binary = torch.zeros(32).to(self.device)
                 noise_variance_out_binary = torch.zeros(32).to(self.device)
             elif 5 < noise_flag < 8:
-                noise_variance_in = torch.rand(size=(1,)) * noise_mod
+                noise_variance_in = noise_power_in #* noise_mod
                 noise_variance_in_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_in).tobytes())
                 noise_variance_in = noise_variance_in.to(self.device)
                 noise_variance_in_binary = [int(noise_variance_in_binary[i], 2) for i in
@@ -274,7 +278,7 @@ class teacher(nn.Module):
                 noise_variance_out = torch.tensor(0.).to(self.device)
                 noise_variance_out_binary = torch.zeros(32).to(self.device)
             elif 8 < noise_flag < 10:
-                noise_variance_out = torch.rand(size=(1,)) * noise_mod
+                noise_variance_out = noise_power_out #* noise_mod
                 noise_variance_out_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_out).tobytes())
                 noise_variance_out = noise_variance_out.to(self.device)
                 noise_variance_out_binary = [int(noise_variance_out_binary[i], 2) for i in
@@ -283,13 +287,13 @@ class teacher(nn.Module):
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_in_binary = torch.zeros(32).to(self.device)
             else:
-                noise_variance_in = torch.rand(size=(1,)) * noise_mod
+                noise_variance_in = noise_power_in #* noise_mod
                 noise_variance_in_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_in).tobytes())
                 noise_variance_in = noise_variance_in.to(self.device)
                 noise_variance_in_binary = [int(noise_variance_in_binary[i], 2) for i in
                                             range(0, len(noise_variance_in_binary), 1)]
                 noise_variance_in_binary = torch.tensor(np.array(noise_variance_in_binary)).to(self.device)
-                noise_variance_out = torch.rand(size=(1,)) * noise_mod
+                noise_variance_out = noise_power_out #* noise_mod
                 noise_variance_out_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_out).tobytes())
                 noise_variance_out = noise_variance_out.to(self.device)
                 noise_variance_out_binary = [int(noise_variance_out_binary[i], 2) for i in
@@ -335,20 +339,20 @@ class teacher(nn.Module):
 
             # Note : Input data
             fuel_subslice_in = self.fft_data(self.fuel_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_noise(self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
+                 self.fft_noise(noise_variance_in,self.fuel_slices[idx_input, slice_x_in, slice_y_in]).to(
                     self.device),
                 nan=0.0))
             r_subslice_in = self.fft_data(self.r_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_noise(self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+                 self.fft_noise(noise_variance_in,self.r_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
             g_subslice_in = self.fft_data(self.g_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_noise(self.g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+                self.fft_noise(noise_variance_in,self.g_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
             b_subslice_in = self.fft_data(self.b_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_noise(self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
+                self.fft_noise(noise_variance_in,self.b_slices[idx_input, slice_x_in, slice_y_in]).to(self.device),
                 nan=0.0))
             alpha_subslice_in = self.fft_data(self.alpha_slices[idx_input, slice_x_in, slice_y_in] + torch.nan_to_num(
-                noise_variance_in * self.fft_noise(self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
+                self.fft_noise(noise_variance_in,self.alpha_slices[idx_input, slice_x_in, slice_y_in]).to(
                     self.device),
                 nan=0.0))
             data_input_subslice = torch.cat([r_subslice_in, g_subslice_in, b_subslice_in, alpha_subslice_in], dim=0)
@@ -368,18 +372,18 @@ class teacher(nn.Module):
 
             # Note : Output data
             fuel_subslice_out = self.fuel_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.fuel_slices[idx_output, slice_x_out, slice_y_out].to(
+                self.fft_noise(noise_variance_out,self.fuel_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),nan=0.0)
             r_subslice_out = self.r_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.r_slices[idx_output, slice_x_out, slice_y_out].to(
+                self.fft_noise(noise_variance_out,self.r_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),nan=0.0)
             g_subslice_out = self.g_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.g_slices[idx_output, slice_x_out, slice_y_out].to(
+                self.fft_noise(noise_variance_out,self.g_slices[idx_output, slice_x_out, slice_y_out]).to(
                     self.device),nan=0.0)
             b_subslice_out = self.b_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.b_slices[idx_output, slice_x_out, slice_y_out], nan=0.0)
+                self.fft_noise(noise_variance_out,self.b_slices[idx_output, slice_x_out, slice_y_out]), nan=0.0)
             alpha_subslice_out = self.alpha_slices[idx_output, slice_x_out, slice_y_out] + torch.nan_to_num(
-                noise_variance_out * self.alpha_slices[idx_output, slice_x_out, slice_y_out].to(self.device), nan=0.0)
+                self.fft_noise(noise_variance_out,self.alpha_slices[idx_output, slice_x_out, slice_y_out]).to(self.device), nan=0.0)
             data_output_subslice = torch.cat([r_subslice_out, g_subslice_out, b_subslice_out, alpha_subslice_out],
                                              dim=0)
 
@@ -1772,23 +1776,24 @@ class teacher(nn.Module):
         loss = torch.mean(diff)
         return loss
 
-    def fft_noise(self, noise):
+    def fft_noise(self,noise_iter, noise):
         cutoff_ratio = torch.rand((1,)).to(self.device)
-        if cutoff_ratio < 0.5:
-            pass
-        else:
-            noise = torch.rand_like(noise, device=self.device)
-            H, W = noise.shape
-            fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
-            fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
-            mask = torch.ones_like(fft_noise_shifted, device=self.device)
-            center_x, center_y = (H-1) // 2, (W-1) // 2
-            cutoff_x = int(cutoff_ratio * center_x)
-            cutoff_y = int(cutoff_ratio * center_y)
-            mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
-            fft_noise = fft_noise * mask
-            fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
-            noise = torch.fft.ifft2(fft_noise_shifted, s=(H, W), dim=(-2, -1)).real
+        # if cutoff_ratio < 0.5:
+        #     pass
+        # else:
+        noise = torch.sum(torch.rand((noise_iter.int().item(),*noise.shape)).to(self.device),dim=0)
+        noise = noise / (noise_iter +1e-12)
+        H, W = noise.shape
+        fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
+        fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
+        mask = torch.ones_like(fft_noise_shifted, device=self.device)
+        center_x, center_y = (H-1) // 2, (W-1) // 2
+        cutoff_x = int(cutoff_ratio * center_x)
+        cutoff_y = int(cutoff_ratio * center_y)
+        mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
+        fft_noise = fft_noise * mask
+        fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
+        noise = torch.fft.ifft2(fft_noise_shifted, s=(H, W), dim=(-2, -1)).real
         return noise
 
     def fft_data(self, data):

@@ -24,7 +24,7 @@ class NCA(nn.Module):
         self.patch_size_y = 15
         self.channels = channels
         self.kernel_size = 3
-        self.wavelet_scales = 7
+        self.wavelet_scales = 5
         self.max_wavelet_scale = 20
         self.min_scale_value = self.max_wavelet_scale*0.01
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
@@ -33,7 +33,7 @@ class NCA(nn.Module):
 
         # self.fig3d = plt.figure(figsize=(6, 6))
         # self.ax3d = self.fig3d.add_subplot(111, projection='3d')
-        self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(12, 7))
+        self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(14, 5))
         self.fig2d.subplots_adjust(
             left=0.01,
             right=0.99,
@@ -300,7 +300,7 @@ class NCA(nn.Module):
         ],dim=1)
         #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
-        quality_score = torch.mean(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.sum(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 
