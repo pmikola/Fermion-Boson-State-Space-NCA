@@ -1782,7 +1782,7 @@ class teacher(nn.Module):
         #     pass
         # else:
         noise = torch.sum(torch.rand((noise_iter.int().item(),*noise.shape)).to(self.device),dim=0)
-        noise = noise / (noise_iter +1e-12)
+        noise = noise / (noise_iter +1e-12) 
         H, W = noise.shape
         fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
         fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
