@@ -33,7 +33,7 @@ input_window_size = 7
 
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
-hdc_dim = 5
+hdc_dim = 6
 rbf_probes_number = 5
 nca_steps = 5
 learning = 1
@@ -80,7 +80,7 @@ for period in range(1, no_periods + 1):
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip*2, criterion, optimizer,criterion_disc, disc_optimizer ,device, learning=learning,
                      num_epochs=150)
-    plt.pause(100000)
+    plt.pause(1e5)
     # t.fsim.simulate(simulate=0,delete_data=1)+
 
 t.visualize_lerning(5)

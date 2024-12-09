@@ -1689,7 +1689,7 @@ class teacher(nn.Module):
         loss_min = self.loss_coeffs.min()
         loss_range = self.loss_coeffs.max() - loss_min + 1e-12
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
-        temperature = 0.2 + 0.5 * normalized_loss_coeffs.std().item()
+        temperature = 0.1 + 0.5 * normalized_loss_coeffs.std().item()
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
         #print( self.loss_coeffs)
         disc_loss = -torch.log(self.disc_loss[-1])
@@ -1782,7 +1782,7 @@ class teacher(nn.Module):
         #     pass
         # else:
         noise = torch.sum(torch.rand((noise_iter.int().item(),*noise.shape)).to(self.device),dim=0)
-        noise = noise / (noise_iter +1e-12) 
+        noise = noise / (noise_iter +1e-12)
         H, W = noise.shape
         fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
         fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))

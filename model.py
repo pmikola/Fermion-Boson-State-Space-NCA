@@ -32,39 +32,41 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.A, self.B, self.C, self.D, self.E, self.F, self.G, self.H, self.I, self.J, self.K, self.L, self.M, self.N = torch.nn.Parameter(torch.full((14,),1.),requires_grad=True).to(self.device)
-
+        self.channels = 5
+        self.xchannels = 4
+        self.xxchannels = 3
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
-        self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
+        self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.channels,kernel_size=3, stride=1, padding=1)
         # [1, 3, 5, 7, 9, 11, 13, 15]
         self.r = nn.ModuleList(
-            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+            [nn.Conv2d(in_channels=self.channels, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
         self.g = nn.ModuleList(
-            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+            [nn.Conv2d(in_channels=self.channels, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
         self.b = nn.ModuleList(
-            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+            [nn.Conv2d(in_channels=self.channels, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
         self.a = nn.ModuleList(
-            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+            [nn.Conv2d(in_channels=self.channels, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
         self.s = nn.ModuleList(
-            [nn.Conv2d(in_channels=hdc_dim, out_channels=hdc_dim, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
-        self.r_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
-        self.g_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
-        self.b_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
-        self.a_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
-        self.s_norm = nn.LayerNorm([hdc_dim, self.in_scale, self.in_scale])
+            [nn.Conv2d(in_channels=self.channels, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in [1, 3, 5, 7, 9, 11, 13, 15]])
+        self.r_norm = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
+        self.g_norm = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
+        self.b_norm = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
+        self.a_norm = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
+        self.s_norm = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
 
-        self.r_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
-        self.g_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
-        self.b_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
-        self.a_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
-        self.s_h = nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.hdc_dim//2, kernel_size=1)
+        self.r_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels, kernel_size=1)
+        self.g_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels, kernel_size=1)
+        self.b_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels, kernel_size=1)
+        self.a_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels, kernel_size=1)
+        self.s_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels, kernel_size=1)
 
-        self.r_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
-        self.g_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
-        self.b_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
-        self.a_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
-        self.s_o = nn.Conv2d(in_channels=self.hdc_dim //2, out_channels=1, kernel_size=1)
+        self.r_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
+        self.g_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
+        self.b_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
+        self.a_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
+        self.s_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
         #self.feedback_weights = nn.Parameter(torch.rand(10))
         self.init_weights()
 

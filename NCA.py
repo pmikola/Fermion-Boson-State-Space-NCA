@@ -17,23 +17,22 @@ class NCA(nn.Module):
         self.batch_size = batch_size
         self.device = device
         self.num_steps =num_steps
-        self.particle_number = channels
-        self.fermion_number =  self.particle_number
-        self.boson_number =  self.particle_number
+        self.channels = channels
+        self.fermion_number =  self.channels
+        self.boson_number =  self.channels
         self.patch_size_x = 15
         self.patch_size_y = 15
-        self.channels = channels
         self.kernel_size = 3
-        self.wavelet_scales = 5
-        self.max_wavelet_scale = 20
-        self.min_scale_value = self.max_wavelet_scale*0.01
+        self.wavelet_scales  = 5
+        self.max_wavelet_scale = 10
+        self.min_scale_value = self.max_wavelet_scale*0.1
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.act = nn.ELU(alpha=1.)
 
         # self.fig3d = plt.figure(figsize=(6, 6))
         # self.ax3d = self.fig3d.add_subplot(111, projection='3d')
-        self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(14, 5))
+        self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(13, 6))
         self.fig2d.subplots_adjust(
             left=0.01,
             right=0.99,
@@ -108,7 +107,7 @@ class NCA(nn.Module):
         self.common_nca_pool_layer_norm = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y]).to(self.device)
         self.lnorm_fermion = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
         self.lnorm_boson = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
-        self.wvl_layer_norm = nn.LayerNorm(self.channels*self.particle_number*self.wavelet_scales).to(self.device)
+        self.wvl_layer_norm = nn.LayerNorm(self.channels * self.channels * self.wavelet_scales).to(self.device)
 
         self.learned_fermion_kernels = nn.ParameterList([
             nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.fermion_number, self.channels, k, k, k), requires_grad=False))
@@ -143,6 +142,7 @@ class NCA(nn.Module):
         x = torch.sum(torch.stack(nca_out_odd), dim=0)
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
+
         #energy_spectrum = dct_3d(x)
         for i in range(self.num_steps):
             if self.training:
@@ -178,8 +178,8 @@ class NCA(nn.Module):
                 for k_size in self.fermion_kernels_size:
                     l_idx = l_idx
                     h_idx = l_idx+(k_size**3).int()*self.channels
-                    f_k = fermion_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
-                                                            k_size.int(), k_size.int())
+                    f_k = fermion_kernels[:, l_idx:h_idx].reshape(self.channels, self.channels, k_size.int(),
+                                                                  k_size.int(), k_size.int())
                     f_kernels.append(f_k)
                     freq_loss[k_idx,i] = self.fft_high_frequency_loss(f_k,hf_data) / f_k.numel()
                     k_idx +=1
@@ -191,8 +191,8 @@ class NCA(nn.Module):
                 for k_size in self.boson_kernels_size:
                     l_idx = l_idx
                     h_idx = l_idx+(k_size ** 3).int()*self.channels
-                    b_k = boson_kernels[:, l_idx:h_idx].reshape(self.particle_number, self.channels, k_size.int(),
-                                                          k_size.int(), k_size.int())
+                    b_k = boson_kernels[:, l_idx:h_idx].reshape(self.channels, self.channels, k_size.int(),
+                                                                k_size.int(), k_size.int())
                     b_kernels.append(b_k)
                     freq_loss[k_idx, i] += self.fft_high_frequency_loss(b_k,hf_data) / b_k.numel()
                     k_idx += 1
@@ -293,10 +293,10 @@ class NCA(nn.Module):
                 0.5*temp_coherence.unsqueeze(1),
                 #0.5*spatial_coherence.unsqueeze(1),
                 #f_div.unsqueeze(1),
-                0.25*E_c.unsqueeze(1),
+                0.5*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
-                -0.1*sparsity_score.unsqueeze(1)
+                -0.2*sparsity_score.unsqueeze(1)
         ],dim=1)
         #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
@@ -402,8 +402,12 @@ class NCA(nn.Module):
                 ax.clear()
         cmap_diff = 'binary'
         cmap_org = 'plasma'
-        e1 = e1.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
-        e2 = e2.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
+
+        e1 = e1.mean(dim=0)
+        e2 = e2.mean(dim=0)
+        x,y = self.equal_reshape(e1,self.num_steps)
+        e1 = e1.reshape(self.num_steps,x,y).cpu().detach().numpy()
+        e2 = e2.reshape(self.num_steps,x,y).cpu().detach().numpy()
         k_1 = []
         k_3 = []
         for i in range(0, len(f_kernels)):
@@ -414,8 +418,10 @@ class NCA(nn.Module):
                     k_3.append(f_kernels[i][j])
         k_1 = torch.stack(k_1)
         k_3 = torch.stack(k_3)
-        k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
-        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        x_k1, y_k1 = self.equal_reshape(k_1, self.num_steps)
+        x_k3, y_k3 = self.equal_reshape(k_3, self.num_steps)
+        k_1_nparray = k_1.reshape(self.num_steps, x_k1, y_k1).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, x_k3, y_k3).cpu().detach().numpy()
         norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
         norm_data_k3 = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
         k = 0
@@ -487,8 +493,8 @@ class NCA(nn.Module):
                     k_3.append(b_kernels[i][j])
         k_1 = torch.stack(k_1)
         k_3 = torch.stack(k_3)
-        k_1_nparray = k_1.reshape(self.num_steps, 5, 5).cpu().detach().numpy()
-        k_3_nparray = k_3.reshape(self.num_steps, 25, 27).cpu().detach().numpy()
+        k_1_nparray = k_1.reshape(self.num_steps, x_k1, y_k1).cpu().detach().numpy()
+        k_3_nparray = k_3.reshape(self.num_steps, x_k3, y_k3).cpu().detach().numpy()
         norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
         norm_data_k3 = (k_3_nparray - np.min(k_3_nparray)) / (np.max(k_3_nparray) - np.min(k_3_nparray))
 
@@ -555,6 +561,15 @@ class NCA(nn.Module):
         #self.fig2d.canvas.draw()
         #plt.pause(0.01)
        # time.sleep(1000)
+
+    def equal_reshape(self,data,n):
+        total_size = data.numel()
+        remaining_size = total_size // n
+        x = int(remaining_size ** 0.5)
+        while remaining_size % x != 0:
+            x -= 1
+        y = remaining_size // x
+        return x,y
 
     def draw_neural_space_in_3d(self,kernels):
         self.ax3d.clear()
