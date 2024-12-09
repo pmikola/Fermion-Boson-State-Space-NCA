@@ -10,6 +10,7 @@ from torch import nn
 from WaveletModel import WaveletModel
 from torch.nn.utils import spectral_norm as sn
 matplotlib.use('TkAgg')
+# print(matplotlib.get_backend())
 class NCA(nn.Module):
     def __init__(self,batch_size, channels, num_steps, device):
         super(NCA, self).__init__()
@@ -33,7 +34,16 @@ class NCA(nn.Module):
         # self.fig3d = plt.figure(figsize=(6, 6))
         # self.ax3d = self.fig3d.add_subplot(111, projection='3d')
         self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(12, 7))
-
+        self.fig2d.subplots_adjust(
+            left=0.01,
+            right=0.99,
+            top=0.99,
+            bottom=0.01,
+            wspace=0.02,
+            hspace=0.02
+        )
+        self.fig2d.show()
+        # self.fig2d.tight_layout()
         self.ims = []
         self.cbar = None
 
@@ -283,14 +293,14 @@ class NCA(nn.Module):
                 0.5*temp_coherence.unsqueeze(1),
                 #0.5*spatial_coherence.unsqueeze(1),
                 #f_div.unsqueeze(1),
-                0.5*E_c.unsqueeze(1),
+                0.25*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
                 -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
         #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
-        quality_score = torch.sum(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.mean(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 
@@ -390,7 +400,7 @@ class NCA(nn.Module):
         for ax_row in self.axs2d:
             for ax in ax_row:
                 ax.clear()
-        cmap_diff = 'RdBu'
+        cmap_diff = 'binary'
         cmap_org = 'plasma'
         e1 = e1.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
         e2 = e2.mean(dim=0).reshape(self.num_steps,25,45).cpu().detach().numpy()
@@ -540,8 +550,10 @@ class NCA(nn.Module):
                 a.set_yticklabels([])
                 a.set_aspect('equal')
 
-        self.fig2d.canvas.draw()
-        plt.pause(0.01)
+        self.fig2d.canvas.draw_idle()
+        self.fig2d.canvas.start_event_loop(0.01)
+        #self.fig2d.canvas.draw()
+        #plt.pause(0.01)
        # time.sleep(1000)
 
     def draw_neural_space_in_3d(self,kernels):

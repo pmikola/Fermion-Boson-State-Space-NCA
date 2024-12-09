@@ -49,7 +49,7 @@ class WaveletModel(nn.Module):
 
         exp_dec_2 = torch.exp(-t ** 2 / (2 * sigma ** 2))
         exp_dec_3 = torch.exp(-t ** 3 / (2 * sigma ** 3))
-        gauss_window =  self.exp_mod[i,0]*(exp_dec_2+exp_dec_3)
+        gauss_window =  self.exp_mod[i,0]*exp_dec_2#+exp_dec_3)
 
         real_wavelet = real_part * gauss_window
         imag_wavelet = imag_part * gauss_window
