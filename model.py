@@ -38,7 +38,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
         self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3, stride=1, padding=1)
-        k_list =  [1, 3, 5]#[1, 3, 5, 7, 9, 11, 13, 15]
+        k_list =  [1, 3, 5, 7, 9, 11, 13, 15]#[1, 3, 5]#
         self.r = nn.ModuleList(
             [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.g = nn.ModuleList(
@@ -169,7 +169,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.cross_correlate_out(x))+x_i
         x = self.act(self.downlift_data(x))
         rgbas = self.act(self.rgbas(x))
-
+        # print(rgbas.shape)
         r = torch.sum(torch.stack([self.act(layer(rgbas[:, 0,  :, :, :].squeeze(1))) for layer in self.r]), dim=0)
         g = torch.sum(torch.stack([self.act(layer(rgbas[:, 1,  :, :, :].squeeze(1))) for layer in self.g]), dim=0)
         b = torch.sum(torch.stack([self.act(layer(rgbas[:, 2,  :, :, :].squeeze(1))) for layer in self.b]), dim=0)

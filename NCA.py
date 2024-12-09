@@ -142,7 +142,6 @@ class NCA(nn.Module):
         x = torch.sum(torch.stack(nca_out_odd), dim=0)
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
-
         #energy_spectrum = dct_3d(x)
         for i in range(self.num_steps):
             if self.training:
@@ -405,7 +404,9 @@ class NCA(nn.Module):
 
         e1 = e1.mean(dim=0)
         e2 = e2.mean(dim=0)
+        #print(e1.shape)
         x,y = self.equal_reshape(e1,self.num_steps)
+        #print(x,y)
         e1 = e1.reshape(self.num_steps,x,y).cpu().detach().numpy()
         e2 = e2.reshape(self.num_steps,x,y).cpu().detach().numpy()
         k_1 = []
@@ -564,6 +565,7 @@ class NCA(nn.Module):
 
     def equal_reshape(self,data,n):
         total_size = data.numel()
+
         remaining_size = total_size // n
         x = int(remaining_size ** 0.5)
         while remaining_size % x != 0:
