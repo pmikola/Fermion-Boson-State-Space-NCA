@@ -293,10 +293,10 @@ class NCA(nn.Module):
                 0.5*temp_coherence.unsqueeze(1),
                 #0.5*spatial_coherence.unsqueeze(1),
                 #f_div.unsqueeze(1),
-                0.5*E_c.unsqueeze(1),
+                0.25*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
-                -0.2*sparsity_score.unsqueeze(1)
+                -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
         #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
@@ -557,7 +557,7 @@ class NCA(nn.Module):
                 a.set_aspect('equal')
 
         self.fig2d.canvas.draw_idle()
-        self.fig2d.canvas.start_event_loop(0.01)
+        self.fig2d.canvas.start_event_loop(0.001)
         #self.fig2d.canvas.draw()
         #plt.pause(0.01)
        # time.sleep(1000)

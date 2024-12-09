@@ -33,7 +33,7 @@ input_window_size = 7
 
 no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
-hdc_dim = 6
+hdc_dim = 5
 rbf_probes_number = 5
 nca_steps = 5
 learning = 1
