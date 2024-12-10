@@ -107,7 +107,8 @@ class NCA(nn.Module):
         self.common_nca_pool_layer_norm = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y]).to(self.device)
         self.lnorm_fermion = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
         self.lnorm_boson = nn.LayerNorm([self.channels,self.channels, self.patch_size_x, self.patch_size_y])
-        self.wvl_layer_norm = nn.LayerNorm(self.channels * self.channels * self.wavelet_scales).to(self.device)
+        self.wvl_layer_norm_f = nn.LayerNorm(self.channels * self.channels * self.wavelet_scales).to(self.device)
+        self.wvl_layer_norm_b = nn.LayerNorm(self.channels * self.channels * self.wavelet_scales).to(self.device)
 
         self.learned_fermion_kernels = nn.ParameterList([
             nn.ParameterList([self._init_orthogonal_kernel(nn.Parameter(torch.empty(self.fermion_number, self.channels, k, k, k), requires_grad=False))
@@ -143,19 +144,29 @@ class NCA(nn.Module):
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
         #energy_spectrum = dct_3d(x)
+        reshaped_energy_spectrum_fermions = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+                                                                 self.patch_size_x, self.patch_size_y)
+        reshaped_energy_spectrum_bosons = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+                                                               self.patch_size_x, self.patch_size_y)
         for i in range(self.num_steps):
             if self.training:
                 #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
-                reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0],self.channels**2, self.patch_size_x , self.patch_size_y)
                 # (self.boson_number, self.channels, k, k, k
-                cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
-                wavelet_space = self.wvl_layer_norm(cwt_wvl)
+                cwt_wvl_f = self.act(self.wvl(reshaped_energy_spectrum_fermions,i).permute(0,2,1))
+                cwt_wvl_b = self.act(self.wvl(reshaped_energy_spectrum_bosons,i).permute(0,2,1))
 
-                fermion_kernels = self.act(self.fermion_features(wavelet_space))
+                wavelet_space_f = self.wvl_layer_norm_f(cwt_wvl_f)
+                wavelet_space_b = self.wvl_layer_norm_b(cwt_wvl_b)
+
+                fermion_kernels = self.act(self.fermion_features(wavelet_space_f))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
-                boson_kernels = self.act(self.boson_features(wavelet_space))
-                real_fermion_space = self.wvl.icwt(fermion_kernels, i)
-                real_boson_space = self.wvl.icwt(boson_kernels, i)
+                boson_kernels = self.act(self.boson_features(wavelet_space_b))
+
+                real_fermion_space = self.wvl.icwt(fermion_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
+                                                               self.patch_size_x, self.patch_size_y)
+                real_boson_space = self.wvl.icwt(boson_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
+                                                               self.patch_size_x, self.patch_size_y)
+
 
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
                 boson_kernels = self.act(self.project_bosons_seq(boson_kernels)).permute(0, 2, 1)
@@ -202,11 +213,15 @@ class NCA(nn.Module):
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response,b_log_det_jacobian = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-                energy_spectrum = (bosonic_energy_states * self.step_param[i]) + energy_spectrum
-                # energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
-                #                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
-                #                                      self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
+                # energy_spectrum = (bosonic_energy_states * self.step_param[i]) + energy_spectrum
+                energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
+                                                     torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
+                                                     self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
 
+                e_s = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+                                                               self.patch_size_x, self.patch_size_y)
+                reshaped_energy_spectrum_fermions = e_s + real_fermion_space
+                reshaped_energy_spectrum_bosons = e_s + real_boson_space
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3, 4],unbiased=False)
 
                 f_log_det_loss = self.fermionic_NCA.normalizing_flow_loss(fermionic_response,f_log_det_jacobian)
@@ -282,7 +297,7 @@ class NCA(nn.Module):
         #dif = self.directional_information_flow(kernels,comm_kernels)
         E_c = self.energy_conservation(kernels,comm_kernels)
         #f_div = self.frequency_diversity(kernels)
-        spatial_coherence = self.spatial_coherence(kernels)
+        #spatial_coherence = self.spatial_coherence(kernels)
         if len(past_kernels) < 2:
             #mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
             temp_coherence = torch.full_like(variance_score,0.,requires_grad=False)
@@ -443,17 +458,16 @@ class NCA(nn.Module):
                 #ax.set_title(f"Step {step}")
             else:
                 diff = np.abs(e1[k] - e1[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
         k = 0
-
         for step in range(0,self.num_steps*2,2):
             ax = self.axs2d[1, step]
             ax.imshow(norm_data_k1[k], cmap=cmap_org, origin="lower")
             #ax.set_title(f"Step {step}")
             k+=1
-        k=0
+        k = 0
         for step in range(1,self.num_steps*2,2):
             ax = self.axs2d[1,step]
             if step == 0:
@@ -461,7 +475,7 @@ class NCA(nn.Module):
                 #ax.set_title(f"Step {step}")
             else:
                 diff = np.abs(norm_data_k1[k] - norm_data_k1[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
         k = 0
@@ -478,7 +492,7 @@ class NCA(nn.Module):
                 #ax.set_title(f"Step {step}")
             else:
                 diff  = np.abs(norm_data_k3[k] - norm_data_k3[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
 
@@ -519,7 +533,7 @@ class NCA(nn.Module):
                 #ax.set_title(f"Step {step}")
             else:
                 diff = np.abs(e2[k] - e2[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
         k = 0
@@ -536,7 +550,7 @@ class NCA(nn.Module):
                 # ax.set_title(f"Step {step}")
             else:
                 diff = np.abs(norm_data_k1[k] - norm_data_k1[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
         k = 0
@@ -553,7 +567,7 @@ class NCA(nn.Module):
                 # ax.set_title(f"Step {step}")
             else:
                 diff = np.abs(norm_data_k3[k] - norm_data_k3[k - 1])
-                diff = 1 - (diff / np.max(diff))
+                #diff = (diff / np.max(diff))
                 ax.imshow(diff, cmap=cmap_diff, origin="lower")
             k += 1
 

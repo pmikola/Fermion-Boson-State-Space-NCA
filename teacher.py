@@ -261,7 +261,7 @@ class teacher(nn.Module):
                 noise_power_out = torch.zeros(1)
             else:
                 #noise_mod = 1.
-                noise_power_in =  torch.randint(1, 50, size=(1,))#torch.rand(size=(1,))
+                noise_power_in =  torch.randint(1, 20, size=(1,))#torch.rand(size=(1,))
                 noise_power_out = noise_power_in-1#torch.randint(0, 20, size=(1,))
             if noise_flag < 5:
                 noise_variance_in = torch.tensor(0.).to(self.device)
@@ -1312,7 +1312,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 20:
+                    if reiterate_counter > 50:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))

@@ -86,28 +86,7 @@ class discriminator(nn.Module):
         noise_var = torch.cat([noise_var_in, noise_var_out], dim=1)
         meta_step = torch.cat([meta_input_h2.float(), meta_output_h2.float()], dim=1)
         x = disc_data[shuffle_idx] + torch.nan_to_num(self.noise_variance * torch.rand_like(disc_data[shuffle_idx]),nan=0.0)
-        space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
-
-        # B, C, H, W = disc_data.shape
-        # fft_data = torch.fft.fft2(disc_data, dim=(-2, -1))
-        # fft_data_shifted = torch.fft.fftshift(fft_data, dim=(-2, -1))
-        # mask = torch.ones((H, W), device=self.device)
-        # center_x, center_y = H // 2, W // 2
-        # cutoff_x = int(self.cutoff_ratio * H // 2)
-        # cutoff_y = int(self.cutoff_ratio * W // 2)
-        # mask[center_x - cutoff_x:center_x + cutoff_x, center_y - cutoff_y:center_y + cutoff_y] = 0.0
-        # mask = mask.unsqueeze(0).unsqueeze(0)
-        # fft_data_filtered = fft_data_shifted * mask
-        # fft_data_original = torch.fft.ifftshift(fft_data_filtered, dim=(-2, -1))
-        # x = torch.fft.ifft2(fft_data_original, dim=(-2, -1))
-        # amp = x.real + x.imag
-        # scaled_amp = amp / 3.0
-        # phase = torch.atan2(x.real, x.imag)
-        # sin_component = scaled_amp * torch.sin(phase)
-        # cos_component = scaled_amp * torch.cos(phase)
-        # sinc_component = scaled_amp * torch.sinc(phase / torch.pi)
-        # x = sin_component + cos_component + sinc_component
-
+        #space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
         x_1 =  self.activate(self.conv0_1x1(x))
         x_3 =  self.activate(self.conv0_3x3(x))
         xa = x_1+x_3
@@ -121,7 +100,7 @@ class discriminator(nn.Module):
         x_3 = self.activate(self.conv3_3x3(xc))+xb
         xd = x_1 + x_3
         x = torch.flatten(xd, start_dim=1)
-        x = self.activate(self.lin_fusion(x))+space_time
+        x = self.activate(self.lin_fusion(x))#+space_time
         r = self.activate(self.r(x))
         g = self.activate(self.g(x))
         b = self.activate(self.b(x))
