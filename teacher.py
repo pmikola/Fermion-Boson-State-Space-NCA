@@ -261,7 +261,7 @@ class teacher(nn.Module):
                 noise_power_out = torch.zeros(1)
             else:
                 #noise_mod = 1.
-                noise_power_in =  torch.randint(1, 20, size=(1,))#torch.rand(size=(1,))
+                noise_power_in =  torch.randint(1, 50, size=(1,))#torch.rand(size=(1,))
                 noise_power_out = noise_power_in-1#torch.randint(0, 20, size=(1,))
             if noise_flag < 5:
                 noise_variance_in = torch.tensor(0.).to(self.device)
@@ -1776,29 +1776,31 @@ class teacher(nn.Module):
         loss = torch.mean(diff)
         return loss
 
-    def fft_noise(self,noise_iter, noise):
+    def fft_noise(self,noise_iter, data):
         cutoff_ratio = torch.rand((1,)).to(self.device)
-        # if cutoff_ratio < 0.5:
-        #     pass
-        # else:
-        noise = torch.sum(torch.rand((noise_iter.int().item(),*noise.shape)).to(self.device),dim=0)
-        noise = noise / (noise_iter +1e-12)
-        H, W = noise.shape
-        fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
-        fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
-        mask = torch.ones_like(fft_noise_shifted, device=self.device)
-        center_x, center_y = (H-1) // 2, (W-1) // 2
-        cutoff_x = int(cutoff_ratio * center_x)
-        cutoff_y = int(cutoff_ratio * center_y)
-        mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
-        fft_noise = fft_noise * mask
-        fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
-        noise = torch.fft.ifft2(fft_noise_shifted, s=(H, W), dim=(-2, -1)).real
-        return noise
+        augment_flag = torch.rand((1,)).to(self.device)
+        if augment_flag < 0.3:
+            return torch.tensor([0]).to(self.device)
+        else:
+            noise = torch.sum(torch.rand((noise_iter.int().item(),*data.shape)).to(self.device),dim=0)
+            noise = noise / (noise_iter +1e-12)
+            H, W = noise.shape
+            fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
+            fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
+            mask = torch.ones_like(fft_noise_shifted, device=self.device)
+            center_x, center_y = (H-1) // 2, (W-1) // 2
+            cutoff_x = int(cutoff_ratio * center_x)
+            cutoff_y = int(cutoff_ratio * center_y)
+            mask[center_x - cutoff_x:center_x + cutoff_x,center_y - cutoff_y:center_y + cutoff_y] = 0.0
+            fft_noise = fft_noise * mask
+            fft_noise_shifted = torch.fft.ifftshift(fft_noise, dim=(-2, -1))
+            noise = torch.fft.ifft2(fft_noise_shifted, s=(H, W), dim=(-2, -1)).real
+            return noise
 
     def fft_data(self, data):
+        cutoff_ratio = torch.rand((1,)).to(self.device)
         augment_flag = torch.rand((1,)).to(self.device)
-        if augment_flag < 0.5:
+        if augment_flag < 0.3:
             return data
         else:
             hf_flag = torch.rand((1,))
@@ -1807,10 +1809,8 @@ class teacher(nn.Module):
             fft_data_shifted = torch.fft.fftshift(fft_data, dim=(-2, -1))
             mask = torch.zeros((H, W ), device=self.device)
             center_x, center_y = (H-1) // 2, (W-1) // 2
-            epoch_fraction = 2*(1+self.epoch) / (1+self.num_of_epochs)
+            epoch_fraction = (1+self.epoch) / (1+self.num_of_epochs)
             cutoff_ratio = 0.1 + 0.9 * epoch_fraction
-            if cutoff_ratio > 1.:
-                return data
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
             if hf_flag < cutoff_ratio:

@@ -12,12 +12,15 @@ class WaveletModel(nn.Module):
         self.channels = channels
         self.height = height
         self.width = width
-        self.scales = nn.Parameter(torch.linspace(min_scale_value, max_scale_value, num_scales)).to(self.device)
-        self.f_mod = nn.Parameter(torch.ones(num_steps),requires_grad=True).to(self.device)
-        self.poly_mod = nn.Parameter(torch.ones(num_steps,14),requires_grad=True).to(self.device)
-        self.exp_mod = nn.Parameter(torch.ones(num_steps, 1),requires_grad=True).to(self.device)
-        self.frac_order = nn.Parameter(torch.ones(num_steps,12),requires_grad=True).to(self.device)
-        self.phase_mod = nn.Parameter(torch.ones(num_steps, 3),requires_grad=True).to(self.device)
+        self.num_scales = num_scales
+        self.num_steps = num_steps
+        self.scales = nn.Parameter(torch.linspace(min_scale_value, max_scale_value, self.num_scales)).to(self.device)
+        self.f_mod = nn.Parameter(torch.ones(self.num_steps),requires_grad=True).to(self.device)
+        self.poly_mod = nn.Parameter(torch.ones(self.num_steps,14),requires_grad=True).to(self.device)
+        self.exp_mod = nn.Parameter(torch.ones(self.num_steps, 1),requires_grad=True).to(self.device)
+        self.frac_order = nn.Parameter(torch.ones(self.num_steps,12),requires_grad=True).to(self.device)
+        self.phase_mod = nn.Parameter(torch.ones(self.num_steps, 3),requires_grad=True).to(self.device)
+
     def forward(self, x,i):
         cwt_transformed = self.cwt(x,self.scales,i)
         return cwt_transformed
@@ -72,3 +75,26 @@ class WaveletModel(nn.Module):
         x = x.repeat(1,len(scales),1)
         cwt_result = F.conv1d(x, wavelets, padding="same", groups=fdim * len(scales))
         return cwt_result
+
+    def icwt(self, cwt_result, i, device="cuda"):
+        cwt_result = cwt_result.permute(0, 2, 1)
+        B = cwt_result.size(0)
+        num_scales = self.num_scales
+        channels_per_scale = cwt_result.shape[1] // num_scales
+        H, W = self.height, self.width
+        cwt_result = cwt_result.view(B, num_scales, channels_per_scale, H * W)
+        reconstructed = torch.zeros((B, channels_per_scale, H * W), device=device)
+        time_steps = torch.arange(H * W, device=device)
+        for s in range(num_scales):
+            scale = self.scales[s]
+            scale_coeffs = cwt_result[:, s, :, :]
+            wavelet = self.wavelet(time_steps, 1.0 / scale, i).to(device)
+            wavelet = wavelet.unsqueeze(0).unsqueeze(0)
+            wavelet = wavelet.repeat(channels_per_scale, 1, 1)
+            wavelet_rev = torch.flip(wavelet, dims=[-1])
+            contribution = torch.nn.functional.conv1d(scale_coeffs, wavelet_rev, padding='same',
+                                                      groups=channels_per_scale)
+            reconstructed += contribution / num_scales
+        reconstructed = reconstructed.view(B, self.channels, self.channels, H, W)
+
+        return reconstructed

@@ -148,13 +148,14 @@ class NCA(nn.Module):
                 #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0],self.channels**2, self.patch_size_x , self.patch_size_y)
                 # (self.boson_number, self.channels, k, k, k
-
                 cwt_wvl = self.act(self.wvl(reshaped_energy_spectrum,i).permute(0,2,1))
                 wavelet_space = self.wvl_layer_norm(cwt_wvl)
 
                 fermion_kernels = self.act(self.fermion_features(wavelet_space))
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 boson_kernels = self.act(self.boson_features(wavelet_space))
+                real_fermion_space = self.wvl.icwt(fermion_kernels, i)
+                real_boson_space = self.wvl.icwt(boson_kernels, i)
 
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
                 boson_kernels = self.act(self.project_bosons_seq(boson_kernels)).permute(0, 2, 1)
@@ -201,9 +202,11 @@ class NCA(nn.Module):
                 fermion_energy_states = self.act(self.lnorm_fermion(fermionic_response))
                 bosonic_response,b_log_det_jacobian = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
-                energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
-                                                     torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
-                                                     self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
+                energy_spectrum = (bosonic_energy_states * self.step_param[i]) + energy_spectrum
+                # energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
+                #                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
+                #                                      self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
+
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3, 4],unbiased=False)
 
                 f_log_det_loss = self.fermionic_NCA.normalizing_flow_loss(fermionic_response,f_log_det_jacobian)
@@ -405,10 +408,11 @@ class NCA(nn.Module):
         e1 = e1.mean(dim=0)
         e2 = e2.mean(dim=0)
         #print(e1.shape)
-        x,y = self.equal_reshape(e1,self.num_steps)
+        e1, num_steps, x1, y1 = self.equal_reshape(e1, self.num_steps)
+        e2, num_steps, x2, y2 = self.equal_reshape(e2, self.num_steps)
         #print(x,y)
-        e1 = e1.reshape(self.num_steps,x,y).cpu().detach().numpy()
-        e2 = e2.reshape(self.num_steps,x,y).cpu().detach().numpy()
+        e1 = e1.reshape(self.num_steps,x1,y1).cpu().detach().numpy()
+        e2 = e2.reshape(self.num_steps,x2,y2).cpu().detach().numpy()
         k_1 = []
         k_3 = []
         for i in range(0, len(f_kernels)):
@@ -419,8 +423,8 @@ class NCA(nn.Module):
                     k_3.append(f_kernels[i][j])
         k_1 = torch.stack(k_1)
         k_3 = torch.stack(k_3)
-        x_k1, y_k1 = self.equal_reshape(k_1, self.num_steps)
-        x_k3, y_k3 = self.equal_reshape(k_3, self.num_steps)
+        k_1, num_steps, x_k1, y_k1 = self.equal_reshape(k_1, self.num_steps)
+        k_3, num_steps, x_k3, y_k3 = self.equal_reshape(k_3, self.num_steps)
         k_1_nparray = k_1.reshape(self.num_steps, x_k1, y_k1).cpu().detach().numpy()
         k_3_nparray = k_3.reshape(self.num_steps, x_k3, y_k3).cpu().detach().numpy()
         norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
@@ -494,6 +498,8 @@ class NCA(nn.Module):
                     k_3.append(b_kernels[i][j])
         k_1 = torch.stack(k_1)
         k_3 = torch.stack(k_3)
+        k_1, num_steps, x_k1, y_k1 = self.equal_reshape(k_1, self.num_steps)
+        k_3, num_steps, x_k3, y_k3 = self.equal_reshape(k_3, self.num_steps)
         k_1_nparray = k_1.reshape(self.num_steps, x_k1, y_k1).cpu().detach().numpy()
         k_3_nparray = k_3.reshape(self.num_steps, x_k3, y_k3).cpu().detach().numpy()
         norm_data_k1 = (k_1_nparray - np.min(k_1_nparray)) / (np.max(k_1_nparray) - np.min(k_1_nparray))
@@ -563,15 +569,24 @@ class NCA(nn.Module):
         #plt.pause(0.01)
        # time.sleep(1000)
 
-    def equal_reshape(self,data,n):
+    def equal_reshape(self, data, n):
         total_size = data.numel()
+        floor_val = total_size // n
 
-        remaining_size = total_size // n
-        x = int(remaining_size ** 0.5)
-        while remaining_size % x != 0:
+        # We'll ignore extra elements if total_size is not divisible by n
+        # Truncate data to use exactly floor_val * n elements
+        if floor_val * n < total_size:
+            data = data.flatten()[:floor_val * n]
+            data = data.view(-1)  # Reshape back to 1D
+        # Now data.numel() == floor_val * n
+        val = floor_val
+        x = int(val ** 0.5)
+        while x > 1:
+            if val % x == 0:
+                y = val // x
+                return data, n, x, y
             x -= 1
-        y = remaining_size // x
-        return x,y
+        return data, n, 1, val
 
     def draw_neural_space_in_3d(self,kernels):
         self.ax3d.clear()
