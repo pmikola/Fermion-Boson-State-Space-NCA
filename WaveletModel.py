@@ -68,33 +68,33 @@ class WaveletModel(nn.Module):
         wavelet = sin_component * cos_component * sinc_component
         return wavelet
 
-    def cwt(self,x, scales,i, device="cuda"):
+    def cwt(self,x, scales,i):
         fdim = x.shape[1]
         x= x.flatten(start_dim=2)
-        space_steps = torch.arange(x.shape[-1], device=device)
-        wavelets = torch.stack([self.wavelet(space_steps, 1.0 / scale,i).unsqueeze(0) for scale in self.scales]).to(device).repeat(fdim,1,1)
+        k_steps = torch.arange(x.shape[-1], device=self.device)
+        wavelets = torch.stack([self.wavelet(k_steps, 1.0 / scale,i).unsqueeze(0) for scale in self.scales]).to(self.device).repeat(fdim,1,1)
         x = x.repeat(1,len(scales),1)
         cwt_result = F.conv1d(x, wavelets, padding="same", groups=fdim * len(scales))
         return cwt_result
 
-    def icwt(self, cwt_result, i, device="cuda"):
+    def icwt(self, cwt_result, i):
         cwt_result = cwt_result.permute(0, 2, 1)
         B = cwt_result.size(0)
         num_scales = self.num_scales
         channels_per_scale = cwt_result.shape[1] // num_scales
         H, W = self.height, self.width
         cwt_result = cwt_result.view(B, num_scales, channels_per_scale, H * W)
-        reconstructed = torch.zeros((B, channels_per_scale, H * W), device=device)
-        time_steps = torch.arange(H * W, device=device)
+        reconstructed = torch.zeros((B, channels_per_scale, H * W), device=self.device)
+        k_steps = torch.arange(H * W, device=self.device)
         for s in range(num_scales):
             scale = self.scales[s]
             scale_coeffs = cwt_result[:, s, :, :]
-            wavelet = self.wavelet(time_steps, 1.0 / scale, i).to(device)
+            wavelet = self.wavelet(k_steps, 1.0 / scale, i).to(self.device)
             wavelet = wavelet.unsqueeze(0).unsqueeze(0)
             wavelet = wavelet.repeat(channels_per_scale, 1, 1)
             wavelet_rev = torch.flip(wavelet, dims=[-1])
             contribution = torch.nn.functional.conv1d(scale_coeffs, wavelet_rev, padding='same',
                                                       groups=channels_per_scale)
-            reconstructed += self.norm_const[s,i]*contribution / num_scales # Note: not excat normalisation - should be integrated over scales contribiution in weighted manner
+            reconstructed += self.norm_const[s,i]*contribution / num_scales
         reconstructed = reconstructed.view(B, self.channels, self.channels, H, W)
         return reconstructed

@@ -24,8 +24,8 @@ class NCA(nn.Module):
         self.patch_size_y = 15
         self.kernel_size = 3
         self.wavelet_scales  = 5
-        self.max_wavelet_scale = 10
-        self.min_scale_value = self.max_wavelet_scale*0.1
+        self.max_wavelet_scale = 20
+        self.min_scale_value = self.max_wavelet_scale*1e-2
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.act = nn.ELU(alpha=1.)
@@ -69,8 +69,15 @@ class NCA(nn.Module):
         self.fermionic_NCA = FermionConvLayer(channels=self.channels,propagation_steps = num_steps, kernel_size=self.kernel_size)
         self.bosonic_NCA = BosonConvLayer(channels=self.channels,propagation_steps = num_steps, kernel_size=self.kernel_size)
 
-        self.wvl = WaveletModel(num_scales=self.wavelet_scales,min_scale_value=self.min_scale_value, max_scale_value=self.max_wavelet_scale,
-                         batch_size=self.batch_size, channels=self.channels,num_steps=self.num_steps, height=self.patch_size_x, width=self.patch_size_y,device=self.device).to('cuda')
+        self.wvl_f = WaveletModel(num_scales=self.wavelet_scales, min_scale_value=self.min_scale_value,
+                                max_scale_value=self.max_wavelet_scale,
+                                batch_size=self.batch_size, channels=self.channels, num_steps=self.num_steps,
+                                height=self.patch_size_x, width=self.patch_size_y, device=self.device).to(self.device)
+
+        self.wvl_b = WaveletModel(num_scales=self.wavelet_scales, min_scale_value=self.min_scale_value,
+                                max_scale_value=self.max_wavelet_scale,
+                                batch_size=self.batch_size, channels=self.channels, num_steps=self.num_steps,
+                                height=self.patch_size_x, width=self.patch_size_y, device=self.device).to(self.device)
 
         self.fermion_features = Linformer(
             dim=self.channels*self.fermion_number*self.wavelet_scales,
@@ -144,16 +151,17 @@ class NCA(nn.Module):
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
         #energy_spectrum = dct_3d(x)
-        reshaped_energy_spectrum_fermions = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
-                                                                 self.patch_size_x, self.patch_size_y)
-        reshaped_energy_spectrum_bosons = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
-                                                               self.patch_size_x, self.patch_size_y)
+        # reshaped_energy_spectrum_fermions = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+        #                                                          self.patch_size_x, self.patch_size_y)
+        # reshaped_energy_spectrum_bosons = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+        #                                                        self.patch_size_x, self.patch_size_y)
         for i in range(self.num_steps):
             if self.training:
-                #reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.patch_size_x * self.patch_size_y*self.channels, energy_spectrum.shape[1])
-                # (self.boson_number, self.channels, k, k, k
-                cwt_wvl_f = self.act(self.wvl(reshaped_energy_spectrum_fermions,i).permute(0,2,1))
-                cwt_wvl_b = self.act(self.wvl(reshaped_energy_spectrum_bosons,i).permute(0,2,1))
+                reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
+                                                                         self.patch_size_x, self.patch_size_y)
+
+                cwt_wvl_f = self.act(self.wvl_f(reshaped_energy_spectrum,i).permute(0,2,1))
+                cwt_wvl_b = self.act(self.wvl_b(reshaped_energy_spectrum,i).permute(0,2,1))
 
                 wavelet_space_f = self.wvl_layer_norm_f(cwt_wvl_f)
                 wavelet_space_b = self.wvl_layer_norm_b(cwt_wvl_b)
@@ -162,10 +170,10 @@ class NCA(nn.Module):
                 ortho_mean,ortho_max = self.validate_channel_orthogonality(fermion_kernels)
                 boson_kernels = self.act(self.boson_features(wavelet_space_b))
 
-                real_fermion_space = self.wvl.icwt(fermion_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
-                                                               self.patch_size_x, self.patch_size_y)
-                real_boson_space = self.wvl.icwt(boson_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
-                                                               self.patch_size_x, self.patch_size_y)
+                # real_fermion_space = self.wvl_f.icwt(fermion_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
+                #                                                self.patch_size_x, self.patch_size_y)
+                # real_boson_space = self.wvl_b.icwt(boson_kernels, i).view(energy_spectrum.shape[0], self.channels ** 2,
+                #                                                self.patch_size_x, self.patch_size_y)
 
 
                 fermion_kernels = self.act(self.project_fermions_seq(fermion_kernels)).permute(0, 2, 1)
@@ -182,7 +190,6 @@ class NCA(nn.Module):
                 boson_kernels = boson_kernels * boson_quality
                 boson_kernels= torch.mean(boson_kernels,dim=0)
                 fermion_kernels = torch.mean(fermion_kernels, dim=0)
-
                 l_idx = 0
                 f_kernels = []
                 k_idx = 0
@@ -216,12 +223,11 @@ class NCA(nn.Module):
                 # energy_spectrum = (bosonic_energy_states * self.step_param[i]) + energy_spectrum
                 energy_spectrum =  (bosonic_energy_states * self.step_param[i] +
                                                      torch.rand_like(bosonic_energy_states) * spiking_probabilities[i] *
-                                                     self.spike_scale[i])+energy_spectrum  # Note: Progressing NCA dynamics by dx
+                                                     self.spike_scale[i])+energy_spectrum
 
-                e_s = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
-                                                               self.patch_size_x, self.patch_size_y)
-                reshaped_energy_spectrum_fermions = e_s + real_fermion_space
-                reshaped_energy_spectrum_bosons = e_s + real_boson_space
+                # e_s = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,self.patch_size_x, self.patch_size_y)
+                # reshaped_energy_spectrum_fermions = e_s #real_fermion_space # *e_s
+                # reshaped_energy_spectrum_bosons = e_s#real_boson_space# *e_s
                 nca_var[:, i] = torch.var(energy_spectrum, dim=[1, 2, 3, 4],unbiased=False)
 
                 f_log_det_loss = self.fermionic_NCA.normalizing_flow_loss(fermionic_response,f_log_det_jacobian)
@@ -289,7 +295,6 @@ class NCA(nn.Module):
     def evaluate_kernel_quality(self, kernels,comm_kernels,past_kernels,i):
         kernels = kernels.detach()
         comm_kernels = comm_kernels.detach()
-
         sparsity_score = torch.mean(torch.abs(kernels), dim=[1, 2]) / (torch.norm(kernels, dim=[1, 2], p=1) + 1e-6)
         variance_score = torch.var(kernels, dim=[1, 2])
         #dif = self.directional_information_flow(kernels,comm_kernels)
@@ -299,7 +304,6 @@ class NCA(nn.Module):
         if len(past_kernels) < 2:
             #mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
             temp_coherence = torch.full_like(variance_score,0.,requires_grad=False)
-
         else:
             #mutual_info_score = self.mutual_information_score(kernels,past_kernels[-2].detach())
             temp_coherence = self.temporal_coherence(kernels, past_kernels[-2].detach())
@@ -308,14 +312,14 @@ class NCA(nn.Module):
                 0.5*temp_coherence.unsqueeze(1),
                 #0.5*spatial_coherence.unsqueeze(1),
                 #f_div.unsqueeze(1),
-                0.25*E_c.unsqueeze(1),
+                0.5*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
                 -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
         #temperature = self.NSC_layers[i](quality_score)
         # print(quality_score.shape)
-        quality_score = torch.sum(torch.softmax(quality_score, dim=0),dim=1).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.softmax(torch.sum(quality_score, dim=1),dim=0).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 

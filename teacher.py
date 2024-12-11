@@ -253,7 +253,7 @@ class teacher(nn.Module):
 
         while not frame >= self.batch_size * 2:
             choose_diffrent_frame = 0
-            noise_flag = torch.randint(low=0, high=10, size=(1,))
+            noise_flag = torch.randint(low=0, high=35, size=(1,))
             # Note: Below is the pseudo diffusion process
             if create_val_dataset == 1:
                 #noise_mod = 0.
@@ -263,12 +263,12 @@ class teacher(nn.Module):
                 #noise_mod = 1.
                 noise_power_in =  torch.randint(1, 20, size=(1,))#torch.rand(size=(1,))
                 noise_power_out = noise_power_in-1#torch.randint(0, 20, size=(1,))
-            if noise_flag < 5:
+            if  noise_flag < 10:
                 noise_variance_in = torch.tensor(0.).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
                 noise_variance_in_binary = torch.zeros(32).to(self.device)
                 noise_variance_out_binary = torch.zeros(32).to(self.device)
-            elif 5 < noise_flag < 8:
+            elif 10 <= noise_flag < 20:
                 noise_variance_in = noise_power_in #* noise_mod
                 noise_variance_in_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_in).tobytes())
                 noise_variance_in = noise_variance_in.to(self.device)
@@ -277,7 +277,7 @@ class teacher(nn.Module):
                 noise_variance_in_binary = torch.tensor(np.array(noise_variance_in_binary)).to(self.device)
                 noise_variance_out = torch.tensor(0.).to(self.device)
                 noise_variance_out_binary = torch.zeros(32).to(self.device)
-            elif 8 < noise_flag < 10:
+            elif 20 <= noise_flag < 30:
                 noise_variance_out = noise_power_out #* noise_mod
                 noise_variance_out_binary = ''.join(f'{c:08b}' for c in np.float32(noise_variance_out).tobytes())
                 noise_variance_out = noise_variance_out.to(self.device)
@@ -1783,7 +1783,7 @@ class teacher(nn.Module):
             return torch.tensor([0]).to(self.device)
         else:
             noise = torch.sum(torch.rand((noise_iter.int().item(),*data.shape)).to(self.device),dim=0)
-            noise = noise / (noise_iter +1e-12)
+            noise = noise / (noise_iter + 1e-12)
             H, W = noise.shape
             fft_noise = torch.fft.fft2(noise, dim=(-2, -1))
             fft_noise_shifted = torch.fft.fftshift(fft_noise, dim=(-2, -1))
@@ -1809,7 +1809,7 @@ class teacher(nn.Module):
             fft_data_shifted = torch.fft.fftshift(fft_data, dim=(-2, -1))
             mask = torch.zeros((H, W ), device=self.device)
             center_x, center_y = (H-1) // 2, (W-1) // 2
-            epoch_fraction = (1+self.epoch) / (1+self.num_of_epochs)
+            epoch_fraction = 2*(1+self.epoch) / (1+self.num_of_epochs)
             cutoff_ratio = 0.1 + 0.9 * epoch_fraction
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)

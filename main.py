@@ -35,7 +35,7 @@ no_frames = 1000
 first_frame, last_frame, frame_skip = 0, no_frames, 10
 hdc_dim = 5
 rbf_probes_number = 5
-nca_steps = 5
+nca_steps = 3
 learning = 1
 
 model = Fermionic_Bosonic_Space_State_NCA(batch_size,no_frame_samples, input_window_size,hdc_dim,rbf_probes_number,nca_steps, device).to(device)
@@ -79,7 +79,7 @@ for period in range(1, no_periods + 1):
     t.fsim.simulate(simulate=0, save_rgb=1, save_alpha=1, save_fuel=1, delete_data=0)
     t.learning_phase(t, no_frame_samples, batch_size, input_window_size, first_frame,
                      last_frame, frame_skip*2, criterion, optimizer,criterion_disc, disc_optimizer ,device, learning=learning,
-                     num_epochs=250)
+                     num_epochs=150)
     plt.pause(1e5)
     # t.fsim.simulate(simulate=0,delete_data=1)+
 

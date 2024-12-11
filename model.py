@@ -32,7 +32,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.A, self.B, self.C, self.D, self.E, self.F, self.G, self.H, self.I, self.J, self.K, self.L, self.M, self.N = torch.nn.Parameter(torch.full((14,),1.),requires_grad=True).to(self.device)
-        self.xchannels = 4
+        self.xchannels = 5
         self.xxchannels = 3
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
@@ -55,17 +55,11 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.a_norm_x = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
         self.s_norm_x = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
 
-        # self.r_norm_xx = nn.LayerNorm([self.xxchannels, self.in_scale, self.in_scale])
-        # self.g_norm_xx = nn.LayerNorm([self.xxchannels, self.in_scale, self.in_scale])
-        # self.b_norm_xx = nn.LayerNorm([self.xxchannels, self.in_scale, self.in_scale])
-        # self.a_norm_xx = nn.LayerNorm([self.xxchannels, self.in_scale, self.in_scale])
-        # self.s_norm_xx = nn.LayerNorm([self.xxchannels, self.in_scale, self.in_scale])
-
-        self.r_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=3, stride=1, padding=1)
-        self.g_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=3, stride=1, padding=1)
-        self.b_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=3, stride=1, padding=1)
-        self.a_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=3, stride=1, padding=1)
-        self.s_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=3, stride=1, padding=1)
+        self.r_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
+        self.g_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
+        self.b_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
+        self.a_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
+        self.s_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
 
         self.r_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
         self.g_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
@@ -176,11 +170,11 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x = self.act(self.downlift_data(x))
         rgbas = self.act(self.rgbas(x))
         # print(rgbas.shape)
-        r = torch.sum(torch.stack([self.act(layer(rgbas[:, 0,  :, :, :].squeeze(1))) for layer in self.r]), dim=0)
-        g = torch.sum(torch.stack([self.act(layer(rgbas[:, 1,  :, :, :].squeeze(1))) for layer in self.g]), dim=0)
-        b = torch.sum(torch.stack([self.act(layer(rgbas[:, 2,  :, :, :].squeeze(1))) for layer in self.b]), dim=0)
-        a = torch.sum(torch.stack([self.act(layer(rgbas[:, 3,  :, :, :].squeeze(1))) for layer in self.a]), dim=0)
-        s = torch.sum(torch.stack([self.act(layer(rgbas[:, 4,  :, :, :].squeeze(1))) for layer in self.s]), dim=0)
+        r = torch.sum(torch.stack([self.act(layer(rgbas[:,  0, :, :, :].squeeze(1))) for layer in self.r]), dim=0)
+        g = torch.sum(torch.stack([self.act(layer(rgbas[:,  1, :, :, :].squeeze(1))) for layer in self.g]), dim=0)
+        b = torch.sum(torch.stack([self.act(layer(rgbas[:,  2, :, :, :].squeeze(1))) for layer in self.b]), dim=0)
+        a = torch.sum(torch.stack([self.act(layer(rgbas[:,  3, :, :, :].squeeze(1))) for layer in self.a]), dim=0)
+        s = torch.sum(torch.stack([self.act(layer(rgbas[:,  4, :, :, :].squeeze(1))) for layer in self.s]), dim=0)
 
         r = self.r_norm_x(r)
         g = self.g_norm_x(g)
@@ -193,12 +187,6 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         b = self.act(self.b_h(b))
         a = self.act(self.a_h(a))
         s = self.act(self.s_h(s))
-
-        # r = self.r_norm_xx(r)
-        # g = self.g_norm_xx(g)
-        # b = self.b_norm_xx(b)
-        # a = self.a_norm_xx(a)
-        # s = self.s_norm_xx(s)
 
         r = self.act(self.r_hh(r))
         g = self.act(self.g_hh(g))
