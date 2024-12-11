@@ -1312,7 +1312,7 @@ class teacher(nn.Module):
                     else:
                         reiterate_counter = 0
                         reiterate_data = 0
-                    if reiterate_counter > 50:
+                    if reiterate_counter > 20:
                         reiterate_counter = 0
                         reiterate_data = 0
                     gloss = abs(np.sum(np.gradient(loss_recent_history)))

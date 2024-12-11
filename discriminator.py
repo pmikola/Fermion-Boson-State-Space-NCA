@@ -86,7 +86,7 @@ class discriminator(nn.Module):
         noise_var = torch.cat([noise_var_in, noise_var_out], dim=1)
         meta_step = torch.cat([meta_input_h2.float(), meta_output_h2.float()], dim=1)
         x = disc_data[shuffle_idx] + torch.nan_to_num(self.noise_variance * torch.rand_like(disc_data[shuffle_idx]),nan=0.0)
-        #space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
+        space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
         x_1 =  self.activate(self.conv0_1x1(x))
         x_3 =  self.activate(self.conv0_3x3(x))
         xa = x_1+x_3
@@ -100,7 +100,7 @@ class discriminator(nn.Module):
         x_3 = self.activate(self.conv3_3x3(xc))+xb
         xd = x_1 + x_3
         x = torch.flatten(xd, start_dim=1)
-        x = self.activate(self.lin_fusion(x))#+space_time
+        x = self.activate(self.lin_fusion(x))+space_time
         r = self.activate(self.r(x))
         g = self.activate(self.g(x))
         b = self.activate(self.b(x))

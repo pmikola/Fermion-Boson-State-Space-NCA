@@ -233,7 +233,6 @@ class NCA(nn.Module):
                         self.learned_fermion_kernels[i][j].copy_(f_kernels[j])
                     for j in range(0, len(self.learned_boson_kernels[i])):
                         self.learned_boson_kernels[i][j].copy_(b_kernels[j])
-
             else:
                 f_kernels = self.learned_fermion_kernels[i]
                 b_kernels = self.learned_boson_kernels[i]
@@ -242,7 +241,6 @@ class NCA(nn.Module):
                 bosonic_response,_ = self.bosonic_NCA(fermion_energy_states,meta_embeddings,i, weights=b_kernels)
                 bosonic_energy_states = self.act(self.lnorm_boson(bosonic_response))
                 energy_spectrum = (bosonic_energy_states * self.step_param[i])+energy_spectrum # Note: Progressing NCA dynamics by dx
-
                 nca_var, ortho_mean, ortho_max,log_det_j_loss ,freq_loss= None,None,None,None,None
                 #energy_spectrum = dct.idct_3d(energy_spectrum)
         if self.training:

@@ -20,6 +20,7 @@ class WaveletModel(nn.Module):
         self.exp_mod = nn.Parameter(torch.ones(self.num_steps, 1),requires_grad=True).to(self.device)
         self.frac_order = nn.Parameter(torch.ones(self.num_steps,12),requires_grad=True).to(self.device)
         self.phase_mod = nn.Parameter(torch.ones(self.num_steps, 3),requires_grad=True).to(self.device)
+        self.norm_const = nn.Parameter(torch.ones(self.num_scales,self.num_steps),requires_grad=True).to(self.device)
 
     def forward(self, x,i):
         cwt_transformed = self.cwt(x,self.scales,i)
@@ -94,7 +95,6 @@ class WaveletModel(nn.Module):
             wavelet_rev = torch.flip(wavelet, dims=[-1])
             contribution = torch.nn.functional.conv1d(scale_coeffs, wavelet_rev, padding='same',
                                                       groups=channels_per_scale)
-            reconstructed += contribution / num_scales
+            reconstructed += self.norm_const[s,i]*contribution / num_scales # Note: not excat normalisation - should be integrated over scales contribiution in weighted manner
         reconstructed = reconstructed.view(B, self.channels, self.channels, H, W)
-
         return reconstructed
