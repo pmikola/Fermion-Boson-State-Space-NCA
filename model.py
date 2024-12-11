@@ -37,18 +37,20 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
-        self.rgbas = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3, stride=1, padding=1)
+        self.rgbas_0 = nn.Conv3d(in_channels=self.hdc_dim,out_channels=5,kernel_size=3, stride=1, padding=1)
+        self.rgbas_1 = nn.Conv3d(in_channels=5,out_channels=5,kernel_size=1)
+
         k_list =  [1, 3, 5, 7, 9, 11, 13, 15]#[1, 3, 5]#
         self.r = nn.ModuleList(
-            [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
+            [nn.Conv2d(in_channels=5, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.g = nn.ModuleList(
-            [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
+            [nn.Conv2d(in_channels=5, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.b = nn.ModuleList(
-            [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
+            [nn.Conv2d(in_channels=5, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.a = nn.ModuleList(
-            [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
+            [nn.Conv2d(in_channels=5, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.s = nn.ModuleList(
-            [nn.Conv2d(in_channels=self.hdc_dim, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
+            [nn.Conv2d(in_channels=5, out_channels=self.xchannels, kernel_size=k, padding=k // 2) for k in k_list])
         self.r_norm_x = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
         self.g_norm_x = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
         self.b_norm_x = nn.LayerNorm([self.xchannels, self.in_scale, self.in_scale])
@@ -168,13 +170,15 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss = self.NCA(x_i,meta_embeddings,spiking_probabilities,hf_data,self.batch_size)
         x = self.act(self.cross_correlate_out(x))+x_i
         x = self.act(self.downlift_data(x))
-        rgbas = self.act(self.rgbas(x))
+        rgbas_0 = self.act(self.rgbas_0(x))
+        rgbas_1 = self.act(self.rgbas_1(rgbas_0))
+
         # print(rgbas.shape)
-        r = torch.sum(torch.stack([self.act(layer(rgbas[:,  0, :, :, :].squeeze(1))) for layer in self.r]), dim=0)
-        g = torch.sum(torch.stack([self.act(layer(rgbas[:,  1, :, :, :].squeeze(1))) for layer in self.g]), dim=0)
-        b = torch.sum(torch.stack([self.act(layer(rgbas[:,  2, :, :, :].squeeze(1))) for layer in self.b]), dim=0)
-        a = torch.sum(torch.stack([self.act(layer(rgbas[:,  3, :, :, :].squeeze(1))) for layer in self.a]), dim=0)
-        s = torch.sum(torch.stack([self.act(layer(rgbas[:,  4, :, :, :].squeeze(1))) for layer in self.s]), dim=0)
+        r = torch.sum(torch.stack([self.act(layer(rgbas_1[:,  0, :, :, :].squeeze(1))) for layer in self.r]), dim=0)
+        g = torch.sum(torch.stack([self.act(layer(rgbas_1[:,  1, :, :, :].squeeze(1))) for layer in self.g]), dim=0)
+        b = torch.sum(torch.stack([self.act(layer(rgbas_1[:,  2, :, :, :].squeeze(1))) for layer in self.b]), dim=0)
+        a = torch.sum(torch.stack([self.act(layer(rgbas_1[:,  3, :, :, :].squeeze(1))) for layer in self.a]), dim=0)
+        s = torch.sum(torch.stack([self.act(layer(rgbas_1[:,  4, :, :, :].squeeze(1))) for layer in self.s]), dim=0)
 
         r = self.r_norm_x(r)
         g = self.g_norm_x(g)
@@ -220,7 +224,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.a]), dim=0)
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.s]), dim=0)
 
-            hf_loss += self.fft_high_frequency_loss(self.rgbas.weight,hf_data) / self.rgbas.weight.numel()
+            hf_loss += self.fft_high_frequency_loss(self.rgbas_1.weight,hf_data) / self.rgbas_1.weight.numel()
             hf_loss += self.fft_high_frequency_loss(self.downlift_data.weight,hf_data) / self.downlift_data.weight.numel()
             hf_loss += self.fft_high_frequency_loss(self.cross_correlate_out.weight,hf_data) / self.cross_correlate_out.weight.numel()
             hf_loss += self.fft_high_frequency_loss(self.cross_correlate_in.weight,hf_data) / self.cross_correlate_in.weight.numel()

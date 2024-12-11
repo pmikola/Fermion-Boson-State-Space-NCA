@@ -858,7 +858,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         #fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=200)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=150)
         plt.show()
 
     def visualize_lerning(self, poly_degree=3):
@@ -1810,6 +1810,8 @@ class teacher(nn.Module):
             mask = torch.zeros((H, W ), device=self.device)
             center_x, center_y = (H-1) // 2, (W-1) // 2
             epoch_fraction = 2*(1+self.epoch) / (1+self.num_of_epochs)
+            # if epoch_fraction > 2:
+            #     return data
             cutoff_ratio = 0.1 + 0.9 * epoch_fraction
             cutoff_x = int(cutoff_ratio * center_x)
             cutoff_y = int(cutoff_ratio * center_y)
