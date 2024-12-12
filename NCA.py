@@ -53,13 +53,16 @@ class NCA(nn.Module):
 
         self.NSC_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(5, 12),
+                nn.Linear(4, 64),
                 nn.ELU(alpha=1.),
-                nn.Linear(12, 12),
+                nn.Linear(64, 128),
                 nn.ELU(alpha=1.),
-                nn.Linear(12, 6),
+                nn.Linear(128, 64),
                 nn.ELU(alpha=1.),
-                nn.Linear(6, 1),
+                nn.Linear(64, 32),
+                nn.ELU(alpha=1.),
+                nn.Linear(32, 4),
+                # nn.ELU(alpha=1.),
                 #nn.ELU(alpha=1.),
             )
             for _ in range(self.num_steps)
@@ -151,10 +154,7 @@ class NCA(nn.Module):
         x = self.common_nca_pool_layer_norm(x)
         energy_spectrum = self.act(self.nca_fusion(x))
         #energy_spectrum = dct_3d(x)
-        # reshaped_energy_spectrum_fermions = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
-        #                                                          self.patch_size_x, self.patch_size_y)
-        # reshaped_energy_spectrum_bosons = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
-        #                                                        self.patch_size_x, self.patch_size_y)
+
         for i in range(self.num_steps):
             if self.training:
                 reshaped_energy_spectrum = energy_spectrum.view(energy_spectrum.shape[0], self.channels ** 2,
@@ -297,10 +297,10 @@ class NCA(nn.Module):
         comm_kernels = comm_kernels.detach()
         sparsity_score = torch.mean(torch.abs(kernels), dim=[1, 2]) / (torch.norm(kernels, dim=[1, 2], p=1) + 1e-6)
         variance_score = torch.var(kernels, dim=[1, 2])
-        #dif = self.directional_information_flow(kernels,comm_kernels)
+        dif = self.directional_information_flow(kernels,comm_kernels)
         E_c = self.energy_conservation(kernels,comm_kernels)
-        #f_div = self.frequency_diversity(kernels)
-        #spatial_coherence = self.spatial_coherence(kernels)
+        f_div = self.frequency_diversity(kernels)
+        spatial_coherence = self.spatial_coherence(kernels)
         if len(past_kernels) < 2:
             #mutual_info_score = torch.full_like(variance_score,0.,requires_grad=False)
             temp_coherence = torch.full_like(variance_score,0.,requires_grad=False)
@@ -310,16 +310,17 @@ class NCA(nn.Module):
         quality_score = torch.cat([
                 0.5*variance_score.unsqueeze(1),
                 0.5*temp_coherence.unsqueeze(1),
-                #0.5*spatial_coherence.unsqueeze(1),
+                #-0.5*spatial_coherence.unsqueeze(1),
                 #f_div.unsqueeze(1),
                 0.5*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
                 -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
-        #temperature = self.NSC_layers[i](quality_score)
+        temperature = self.NSC_layers[i](quality_score)
+        # print(temperature.shape,quality_score.shape)
         # print(quality_score.shape)
-        quality_score = torch.softmax(torch.sum(quality_score, dim=1),dim=0).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.softmax(torch.sum(quality_score / (temperature+1e-12), dim=1) ,dim=0).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 

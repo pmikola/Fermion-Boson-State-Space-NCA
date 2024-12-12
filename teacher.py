@@ -867,9 +867,9 @@ class teacher(nn.Module):
         plt.plot(self.val_loss, color='orange',label='test')
         plt.plot(np.array(torch.tensor(self.disc_loss).cpu()), color='red', label='disc')
         plt.plot(self.vsi_loss,label='vsi_loss',linestyle=':')
-        # plt.plot(self.entropy_loss,label='entropy_loss',marker='p')
+        plt.plot(self.entropy_loss,label='entropy_loss',marker='p')
         plt.plot(self.grad_penalty,label='grad_penalty')
-        #plt.plot(self.kl_loss,label='kl_loss',marker='h')
+        plt.plot(self.kl_loss,label='kl_loss',marker='h')
         plt.plot(self.sink_loss,label='sink_loss',marker='^')
         plt.plot(self.critical_loss,label='critical_loss',linestyle='--')
         plt.plot(self.hf_e_loss,label='hf_e_loss',marker='+')
@@ -877,7 +877,7 @@ class teacher(nn.Module):
         plt.plot(self.value_loss,label='value_loss',marker='s')
         plt.plot(self.diff_fft_loss,label='diff_fft_loss',linestyle='-.')
         plt.plot(self.fft_loss,label='fft_loss',marker='v')
-        #plt.plot(self.diff_loss,label='diff_loss')
+        plt.plot(self.diff_loss,label='diff_loss')
         plt.plot(self.log_det_jacobian_loss,label='log_det_jacobian_loss')
         #plt.plot(self.freq_loss,label='freq_loss')
         # plt.plot(self.val_vsi_loss,label='val_vsi_loss',linestyle='--')
@@ -1255,7 +1255,7 @@ class teacher(nn.Module):
                 self.entropy_loss.append(loss[2].item())
                 self.grad_penalty.append(loss[3].item())
                 self.kl_loss.append(loss[4].item())
-                #self.sink_loss.append(loss[5].item())
+                self.sink_loss.append(loss[5].item())
                 self.critical_loss.append(loss[6].item())
                 self.hf_e_loss.append(loss[7].item())
                 self.b_loss.append(loss[8].item())
@@ -1658,13 +1658,18 @@ class teacher(nn.Module):
         for pred_channel,true_channel_w ,true_channel,losses in zip([t.unsqueeze(1).unsqueeze(2)*pred_r, t.unsqueeze(1).unsqueeze(2)*pred_g, t.unsqueeze(1).unsqueeze(2)*pred_b, t.unsqueeze(1).unsqueeze(2)*pred_a, t.unsqueeze(1).unsqueeze(2)*pred_s],
                                                                     [t_1.unsqueeze(1).unsqueeze(2)*r_out, t_1.unsqueeze(1).unsqueeze(2)*g_out, t_1.unsqueeze(1).unsqueeze(2)*b_out, t_1.unsqueeze(1).unsqueeze(2)*a_out, t_1.unsqueeze(1).unsqueeze(2)*s_out],
                                                                     [r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
+
+            p_log_pred = f.log_softmax(pred_channel.flatten(), dim=0)
+            p_log_true = f.log_softmax(true_channel.flatten(), dim=0)
+            #p_log_true_w = f.log_softmax(true_channel_w.flatten(), dim=0)
+
             p_pred = f.softmax(pred_channel.flatten(), dim=0)
             p_true = f.softmax(true_channel.flatten(), dim=0)
-            p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
-            entropy_pred = torch.sum(-p_pred * torch.log(p_pred + 1e-9))
-            entropy_true = torch.sum(-p_true * torch.log(p_true + 1e-9))
-            entropy_true_w = torch.sum(-p_true_w * torch.log(p_true_w + 1e-9))
-            entropy_loss += criterion(entropy_pred+entropy_true_w , entropy_true)
+            #p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
+            entropy_pred = -torch.sum(p_pred * p_log_pred + 1e-9)
+            entropy_true = -torch.sum(p_true * p_log_true + 1e-9)
+            #entropy_true_w = -torch.sum(p_true_w * p_log_true_w + 1e-9)
+            entropy_loss += criterion(entropy_pred , entropy_true)
             losses += entropy_loss
 
 
@@ -1845,8 +1850,8 @@ class teacher(nn.Module):
         pred = torch.cat([pred_r.detach().unsqueeze(1), pred_g.detach().unsqueeze(1), pred_b.detach().unsqueeze(1), pred_a.detach().unsqueeze(1), pred_s.detach().unsqueeze(1)], dim=1)
         true = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1), s_out.unsqueeze(1)], dim=1)
         # Note : Fill value for label smoothing
-        fake_labels = torch.full((pred.shape[0], 1), 0.05).to(self.device)
-        true_labels = torch.full((true.shape[0], 1), 0.95).to(self.device)
+        fake_labels = torch.rand((pred.shape[0], 1)).to(self.device) * 0.15
+        true_labels = 0.85 + torch.rand((true.shape[0], 1)).to(self.device) * 0.15
         combined_data = torch.cat([pred, true], dim=0)
         # _,_, h, w = combined_data.shape
         # mask = torch.ones_like(combined_data, device=self.device)
@@ -1863,12 +1868,12 @@ class teacher(nn.Module):
 
     @staticmethod
     def seed_setter(seed):
-        s = torch.randint(0, seed, (1,))
-        torch.manual_seed(2024 + s)
-        s = np.random.randint(0, seed)
-        np.random.seed(2024 + s)
-        s = random.randint(0, seed)
-        random.seed(2024 + s)
+        #s = torch.randint(0, seed, (1,))
+        torch.manual_seed(2024)# + s)
+        #s = np.random.randint(0, seed)
+        np.random.seed(2024)# + s)
+        #s = random.randint(0, seed)
+        random.seed(2024)# + s)
 
 
 class AddGaussianNoise(object):
