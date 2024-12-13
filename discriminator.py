@@ -72,21 +72,21 @@ class discriminator(nn.Module):
 
     def forward(self, disc_data, g_model_data, shuffle_idx):
         (_, _, meta_input_h1, meta_input_h2, meta_input_h3,
-         _, _, noise_var_in, fmot_in, meta_output_h1, meta_output_h2,
-         meta_output_h3, _, _, noise_var_out) = g_model_data
+         _, _, meta_in, t_stamps, permeation_stamps_binary, meta_output_h1, meta_output_h2,
+         meta_output_h3, _, _, meta_out) = g_model_data
 
         meta_input_h2 = torch.cat([meta_input_h2, meta_input_h2], dim=0)[shuffle_idx]
         meta_input_h3 = torch.cat([meta_input_h3, meta_input_h3], dim=0)[shuffle_idx]
-        noise_var_in = torch.cat([noise_var_in, fmot_in, noise_var_in], dim=0)[shuffle_idx]
+        meta_in = torch.cat([meta_in, t_stamps,permeation_stamps_binary, meta_in], dim=0)[shuffle_idx]
         meta_output_h2 = torch.cat([meta_output_h2, meta_output_h2], dim=0)[shuffle_idx]
         meta_output_h3 = torch.cat([meta_output_h3, meta_output_h3], dim=0)[shuffle_idx]
-        noise_var_out = torch.cat([noise_var_out, noise_var_out], dim=0)[shuffle_idx]
+        meta_out = torch.cat([meta_out, meta_out], dim=0)[shuffle_idx]
 
         meta_central_points = torch.cat([meta_input_h3.float(), meta_output_h3.float()], dim=1)
-        noise_var = torch.cat([noise_var_in, noise_var_out], dim=1)
+        meta = torch.cat([meta_in, meta_out], dim=1)
         meta_step = torch.cat([meta_input_h2.float(), meta_output_h2.float()], dim=1)
         x = disc_data[shuffle_idx] + torch.nan_to_num(self.noise_variance * torch.rand_like(disc_data[shuffle_idx]),nan=0.0)
-        space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, noise_var)
+        space_time = self.WalshHadamardSpaceTimeFeature(meta_central_points, meta_step, meta)
         x_1 =  self.activate(self.conv0_1x1(x))
         x_3 =  self.activate(self.conv0_3x3(x))
         xa = x_1+x_3

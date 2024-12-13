@@ -57,8 +57,10 @@ class teacher(nn.Module):
         self.meta_input_h4 = None
         self.meta_input_h5 = None
         self.noise_diff_in = None
-        self.fmot_in = None
-        self.fmot_in_binary = None
+        self.t_stamps = None
+        self.t_stamps_binary = None
+        self.permeation_stamps = None
+        self.permeation_stamps_binary = None
         self.data_output = None
         self.structure_output = None  #torch.zeros((self.model.batch_size,self.model.in_scale,self.model.in_scale),requires_grad=True)
         self.meta_output_h1 = None
@@ -78,8 +80,10 @@ class teacher(nn.Module):
         self.meta_input_h4_val = None
         self.meta_input_h5_val = None
         self.noise_var_in_val = None
-        self.fmot_in_val = None
-        self.fmot_in_binary_val = None
+        self.t_stamps_val = None
+        self.t_stamps_binary_val = None
+        self.permeation_stamps_val = None
+        self.permeation_stamps_binary_val = None
         self.meta_output_h1_val = None
         self.meta_output_h2_val = None
         self.meta_output_h3_val = None
@@ -239,8 +243,10 @@ class teacher(nn.Module):
         meta_input_h4 = []
         meta_input_h5 = []
         noise_var_in = []
-        fmot_in = []
-        fmot_in_binary = []
+        t_stamps = []
+        t_stamps_binary = []
+        permeation_stamps = []
+        permeation_stamps_binary = []
         data_output = []
         structure_output = []
         meta_output_h1 = []
@@ -301,10 +307,15 @@ class teacher(nn.Module):
                 noise_variance_out_binary = torch.tensor(np.array(noise_variance_out_binary)).to(self.device)
 
             # Note: Flow Matching OT Noise gen
-            fmot_coef = torch.rand(size=(1,))#torch.ones(size=(1,))
-            fmot_coef_binary = ''.join(f'{c:08b}' for c in np.float32(fmot_coef).tobytes())
-            fmot_coef_binary = [int(fmot_coef_binary[i], 2) for i in range(0, len(fmot_coef_binary), 1)]
-            fmot_coef_binary = torch.tensor(np.array(fmot_coef_binary)).to(self.device)
+            t_stamps_coef = torch.rand(size=(1,))#torch.ones(size=(1,))
+            t_stamps_coef_binary = ''.join(f'{c:08b}' for c in np.float32(t_stamps_coef).tobytes())
+            t_stamps_coef_binary = [int(t_stamps_coef_binary[i], 2) for i in range(0, len(t_stamps_coef_binary), 1)]
+            t_stamps_coef_binary = torch.tensor(np.array(t_stamps_coef_binary)).to(self.device)
+
+            permeation_stamps_coef = torch.rand(size=(1,))  # torch.ones(size=(1,))
+            permeation_stamps_coef_binary = ''.join(f'{c:08b}' for c in np.float32(t_stamps_coef).tobytes())
+            permeation_stamps_coef_binary = [int(permeation_stamps_coef_binary[i], 2) for i in range(0, len(permeation_stamps_coef_binary), 1)]
+            permeation_stamps_coef_binary = torch.tensor(np.array(permeation_stamps_coef_binary)).to(self.device)
 
             idx_input = random.choice(range(0, self.n_frames-1))
             central_point_x_in = random.sample(x_range, 1)[0]
@@ -474,8 +485,10 @@ class teacher(nn.Module):
                 meta_input_h4.append(torch.cat([torch.tensor(window_x_in), torch.tensor(window_y_in)]))
                 meta_input_h5.append(meta_step_in_numeric)
                 noise_var_in.append(noise_variance_in_binary.to(torch.float))
-                fmot_in.append(fmot_coef)
-                fmot_in_binary.append(fmot_coef_binary.to(torch.float))
+                t_stamps.append(t_stamps_coef)
+                t_stamps_binary.append(t_stamps_coef_binary.to(torch.float))
+                permeation_stamps.append(permeation_stamps_coef)
+                permeation_stamps_binary.append(permeation_stamps_coef_binary)
                 data_output.append(data_output_subslice)
                 structure_output.append(fuel_subslice_out)
                 meta_output_h1.append(meta_output_subslice)
@@ -494,8 +507,10 @@ class teacher(nn.Module):
             self.meta_input_h4_val = torch.stack(meta_input_h4, dim=0)[0:self.batch_size].to(self.device)
             self.meta_input_h5_val = torch.stack(meta_input_h5, dim=0)[0:self.batch_size].to(self.device)
             self.noise_var_in_val = torch.stack(noise_var_in, dim=0)[0:self.batch_size].to(self.device)
-            self.fmot_in_val = torch.stack(fmot_in, dim=0)[0:self.batch_size].to(self.device)
-            self.fmot_in_binary_val = torch.stack(fmot_in_binary, dim=0)[0:self.batch_size].to(self.device)
+            self.t_stamps_val = torch.stack(t_stamps, dim=0)[0:self.batch_size].to(self.device)
+            self.t_stamps_binary_val = torch.stack(t_stamps_binary, dim=0)[0:self.batch_size].to(self.device)
+            self.permeation_stamps_val = torch.stack(permeation_stamps, dim=0)[0:self.batch_size].to(self.device)
+            self.permeation_stamps_binary_val = torch.stack(permeation_stamps_binary, dim=0)[0:self.batch_size].to(self.device)
             self.data_output_val = torch.stack(data_output, dim=0)[0:self.batch_size].to(self.device)
             self.structure_output_val = torch.stack(structure_output, dim=0)[0:self.batch_size].to(self.device)
             self.meta_output_h1_val = torch.stack(meta_output_h1, dim=0)[0:self.batch_size].to(self.device)
@@ -513,9 +528,10 @@ class teacher(nn.Module):
             self.meta_input_h4 = torch.stack(meta_input_h4, dim=0).to(self.device)
             self.meta_input_h5 = torch.stack(meta_input_h5, dim=0).to(self.device)
             self.noise_diff_in = torch.stack(noise_var_in, dim=0).to(self.device)
-            self.fmot_in = torch.stack(fmot_in, dim=0).to(self.device)
-            self.fmot_in_binary = torch.stack(fmot_in_binary, dim=0).to(self.device)
-
+            self.t_stamps = torch.stack(t_stamps, dim=0).to(self.device)
+            self.t_stamps_binary = torch.stack(t_stamps_binary, dim=0).to(self.device)
+            self.permeation_stamps = torch.stack(permeation_stamps, dim=0).to(self.device)
+            self.permeation_stamps_binary = torch.stack(permeation_stamps_binary, dim=0).to(self.device)
             self.data_output = torch.stack(data_output, dim=0).to(self.device)
             self.structure_output = torch.stack(structure_output, dim=0).to(self.device)
             self.meta_output_h1 = torch.stack(meta_output_h1, dim=0).to(self.device)
@@ -749,7 +765,9 @@ class teacher(nn.Module):
             meta_input_h3 = torch.tensor(np.array(central_points_xy_binary))
             meta_input_h4 = torch.cat([x_idx[:, 0:-1], y_idx[:, 0:-1]], dim=1)
             noise_var_in = torch.zeros((data_input.shape[0], 32))
-            fmot_in_binary = torch.zeros((data_input.shape[0], 32))
+            t_stamps_binary = torch.zeros((data_input.shape[0], 32))
+            permeation_stamps_binary = torch.zeros((data_input.shape[0], 32))
+
             meta_input_h5 = meta_step_in_numeric.repeat(data_input.shape[0], 1).squeeze(1)
             data_output = data_output_subslice
             meta_output_h1 = meta_output_subslice.unsqueeze(0).repeat(data_input.shape[0], 1)
@@ -762,7 +780,7 @@ class teacher(nn.Module):
 
 
             (data_input, structure_input, meta_input_h1, meta_input_h2,
-             meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
+             meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, t_stamps_binary, permeation_stamps_binary, meta_output_h1,
              meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = \
                 (data_input.to(device),
                  structure_input.to(device),
@@ -772,7 +790,8 @@ class teacher(nn.Module):
                  meta_input_h4.to(device),
                  meta_input_h5.to(device),
                  noise_var_in.to(device),
-                 fmot_in_binary.to(device),
+                 t_stamps_binary.to(device),
+                 permeation_stamps_binary.to(device),
                  meta_output_h1.to(device),
                  meta_output_h2.to(device),
                  meta_output_h3.to(device),
@@ -782,7 +801,7 @@ class teacher(nn.Module):
 
             # data_output = data_output.to(device)
             dataset = (data_input, structure_input, meta_input_h1, meta_input_h2,
-                       meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, fmot_in_binary, meta_output_h1,
+                       meta_input_h3, meta_input_h4, meta_input_h5, noise_var_in, t_stamps_binary,permeation_stamps_binary, meta_output_h1,
                        meta_output_h2, meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out)
             self.model.eval()
             with torch.no_grad():
@@ -858,7 +877,7 @@ class teacher(nn.Module):
         fig.colorbar(rms_anim, ax=ax3)
         #fig.colorbar(w_static, ax=ax4)
         ani = animation.ArtistAnimation(fig, ims, interval=1, blit=True, repeat_delay=100)
-        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=150)
+        ani.save("flame_animation.gif", writer='imagemagick', fps=24,dpi=100)
         plt.show()
 
     def visualize_lerning(self, poly_degree=3):
@@ -1185,7 +1204,7 @@ class teacher(nn.Module):
             self.validation_dataset = (
                 self.data_input_val, self.structure_input_val, self.meta_input_h1_val, self.meta_input_h2_val,
                 self.meta_input_h3_val, self.meta_input_h4_val, self.meta_input_h5_val, self.noise_var_in_val,
-                self.fmot_in_binary_val,
+                self.t_stamps_binary_val,self.permeation_stamps_binary_val,
                 self.meta_output_h1_val, self.meta_output_h2_val, self.meta_output_h3_val, self.meta_output_h4_val,
                 self.meta_output_h5_val, self.noise_var_out_val)
             for epoch in range(num_epochs):
@@ -1203,7 +1222,7 @@ class teacher(nn.Module):
                 dataset = (self.data_input[m_idx], self.structure_input[m_idx], self.meta_input_h1[m_idx],
                            self.meta_input_h2[m_idx],
                            self.meta_input_h3[m_idx], self.meta_input_h4[m_idx], self.meta_input_h5[m_idx],
-                           self.noise_diff_in[m_idx], self.fmot_in_binary[m_idx], self.meta_output_h1[m_idx],
+                           self.noise_diff_in[m_idx], self.t_stamps_binary[m_idx],self.permeation_stamps_binary[m_idx], self.meta_output_h1[m_idx],
                            self.meta_output_h2[m_idx], self.meta_output_h3[m_idx], self.meta_output_h4[m_idx],
                            self.meta_output_h5[m_idx], self.noise_diff_out[m_idx])
 
@@ -1224,9 +1243,7 @@ class teacher(nn.Module):
                     self.discriminator.noise_variance = 1 - ((1+self.epoch) / (1+self.num_of_epochs))
                 else:
                     self.discriminator.noise_variance = torch.rand((1,)).to(self.device)
-                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,
-                                                    self.structure_output,
-                                                    criterion_disc)
+                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,self.structure_output,criterion_disc)
                 disc_optimizer.zero_grad(set_to_none=True)
                 disc_loss.backward()
                 disc_optimizer.step()
@@ -1375,8 +1392,12 @@ class teacher(nn.Module):
                          criterion,norm='backward'):
         pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss, lw = model_output
 
-        t = 1 - self.fmot_in[idx].unsqueeze(1)
-        t_1 = self.fmot_in[idx].unsqueeze(1)
+        t = self.t_stamps[idx].unsqueeze(1)
+        t_1 = 1 - self.t_stamps[idx].unsqueeze(1)
+
+        rp = 1 - self.permeation_stamps[idx].unsqueeze(1)
+        rt = self.permeation_stamps[idx].unsqueeze(1)
+
         r_in = data_input[:, 0:self.model.in_scale, :][idx]
         g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx]
         b_in = data_input[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx]
@@ -1412,11 +1433,23 @@ class teacher(nn.Module):
         a_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[3])]
         s_b_idx = torch.randperm(b_idx_pool.shape[0])[:int(l*self.loss_coeffs[4])]
 
-        pred_r = t_1*pred_r+r_in*t
-        pred_g = t_1*pred_g+g_in*t
-        pred_b = t_1*pred_b+b_in*t
-        pred_a = t_1*pred_a+a_in*t
-        pred_s = t_1*pred_s+s_in*t
+        r_out = t_1 * data_output[:, 0:self.model.in_scale, :][idx] + r_in * t
+        g_out = t_1 * data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx] + g_in * t  # .view(self.batch_size, -1)
+        b_out = t_1 * data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx] + b_in * t  # .view(self.batch_size, -1)
+        a_out = t_1 * data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx] + a_in * t  # .view(self.batch_size, -1)
+        s_out = t_1 * structure_output[idx] + s_in * t  # .view(self.batch_size, -1)
+
+        pred_r = (t_1*pred_r+r_in*t)
+        pred_g = (t_1*pred_g+g_in*t)
+        pred_b = (t_1*pred_b+b_in*t)
+        pred_a = (t_1*pred_a+a_in*t)
+        pred_s = (t_1*pred_s+s_in*t)
+
+        pred_r = (rt * r_out + pred_r * rp)
+        pred_g = (rt * g_out + pred_g * rp)
+        pred_b = (rt * b_out + pred_b * rp)
+        pred_a = (rt * a_out + pred_a * rp)
+        pred_s = (rt * s_out + pred_s * rp)
 
         pred_r[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
         pred_g[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
@@ -1430,12 +1463,6 @@ class teacher(nn.Module):
         pred_a[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
         pred_s[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
 
-        r_out = t_1*data_output[:, 0:self.model.in_scale, :][idx]+r_in*t
-        g_out = t_1*data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx]+g_in*t  #.view(self.batch_size, -1)
-        b_out = t_1*data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx] +b_in*t #.view(self.batch_size, -1)
-        a_out = t_1*data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx]+a_in*t  #.view(self.batch_size, -1)
-        s_out = t_1*structure_output[idx]+s_in*t  #.view(self.batch_size, -1)
-
         r_out[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
         g_out[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
         b_out[c_idx_pool[b_c_idx]] = mask[c_idx_pool[b_c_idx]]
@@ -1447,6 +1474,7 @@ class teacher(nn.Module):
         b_out[b_idx_pool[b_b_idx]] = mask[b_idx_pool[b_b_idx]]
         a_out[b_idx_pool[a_b_idx]] = mask[b_idx_pool[a_b_idx]]
         s_out[b_idx_pool[s_b_idx]] = mask[b_idx_pool[s_b_idx]]
+
 
         if pred_r.shape[0] != self.batch_size:
             n = int(pred_r.shape[0] / self.batch_size)
@@ -1670,6 +1698,8 @@ class teacher(nn.Module):
             losses += entropy_loss
 
 
+
+
         self.loss_coeffs[0] = r_loss.mean().item()
         self.loss_coeffs[1] = g_loss.mean().item()
         self.loss_coeffs[2] = b_loss.mean().item()
@@ -1831,8 +1861,7 @@ class teacher(nn.Module):
         dataset = (
             self.data_input[idx], self.structure_input[idx], self.meta_input_h1[idx], self.meta_input_h2[idx],
             self.meta_input_h3[idx], self.meta_input_h4[idx], self.meta_input_h5[idx], self.noise_diff_in[idx],
-            self.fmot_in_binary[idx],
-            self.meta_output_h1[idx],
+            self.t_stamps_binary[idx],self.permeation_stamps_binary[idx],self.meta_output_h1[idx],
             self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
             self.noise_diff_out[idx])
 

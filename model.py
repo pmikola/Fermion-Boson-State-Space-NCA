@@ -23,7 +23,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.in_scale = (1 + self.input_window_size * 2)
         self.loss_weights = nn.Parameter(torch.ones(16))
         self.modes = 32
-        self.uplift_meta_0 = nn.Linear(200,15*self.modes)
+        self.uplift_meta_0 = nn.Linear(232,15*self.modes)
         self.uplift_meta_1 = nn.Linear(15*self.modes, 5 * self.in_scale ** 2)
         self.uplift_meta = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim,kernel_size=1)
         self.uplift_data = nn.Conv2d(in_channels=5, out_channels=self.hdc_dim, kernel_size=1)
@@ -137,7 +137,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
 
         old_batch_size = self.batch_size
         (data_input, structure_input, meta_input_h1, meta_input_h2, meta_input_h3,
-         meta_input_h4, meta_input_h5, noise_var_in_binary, fmot_in_binary, meta_output_h1, meta_output_h2,
+         meta_input_h4, meta_input_h5, noise_var_in_binary, t_stamps_binary,permeation_stamps_binary, meta_output_h1, meta_output_h2,
          meta_output_h3, meta_output_h4, meta_output_h5, noise_var_out) = din
         if data_input.shape[0] != self.batch_size:
             self.batch_size = data_input.shape[0]
@@ -157,8 +157,8 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         time_in,time_out = meta_input_h2,meta_output_h2
         pos_in,pos_out = meta_input_h3,meta_output_h3
 
-        meta_to_uplift = torch.cat([time_in,time_out,fmot_in_binary,noise_var_in_binary,noise_var_out,pos_in,pos_out],dim=-1)
-        #print(meta_to_uplift.shape)
+        meta_to_uplift = torch.cat([time_in, time_out, t_stamps_binary, noise_var_in_binary,permeation_stamps_binary, noise_var_out, pos_in, pos_out], dim=-1)
+        # print(meta_to_uplift.shape)
         meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
         meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
         meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)
