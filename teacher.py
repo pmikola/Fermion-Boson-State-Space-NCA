@@ -1654,20 +1654,20 @@ class teacher(nn.Module):
 
         # KL Div LOSS
         pred_distribution_r = f.log_softmax(pred_r.flatten(start_dim=1), dim=-1)
-        target_distribution_r = f.softmax(r_out.flatten(start_dim=1), dim=-1)
+        target_distribution_r = f.log_softmax(r_out.flatten(start_dim=1), dim=-1)
         pred_distribution_g = f.log_softmax(pred_g.flatten(start_dim=1), dim=-1)
-        target_distribution_g = f.softmax(g_out.flatten(start_dim=1), dim=-1)
+        target_distribution_g = f.log_softmax(g_out.flatten(start_dim=1), dim=-1)
         pred_distribution_b = f.log_softmax(pred_b.flatten(start_dim=1), dim=-1)
-        target_distribution_b = f.softmax(b_out.flatten(start_dim=1), dim=-1)
+        target_distribution_b = f.log_softmax(b_out.flatten(start_dim=1), dim=-1)
         pred_distribution_a = f.log_softmax(pred_a.flatten(start_dim=1), dim=-1)
-        target_distribution_a = f.softmax(a_out.flatten(start_dim=1), dim=-1)
+        target_distribution_a = f.log_softmax(a_out.flatten(start_dim=1), dim=-1)
         pred_distribution_s = f.log_softmax(pred_s.flatten(start_dim=1), dim=-1)
-        target_distribution_s = f.softmax(s_out.flatten(start_dim=1), dim=-1)
-        kl_loss_r = f.kl_div(pred_distribution_r, target_distribution_r, reduction="sum", log_target=False)
-        kl_loss_g = f.kl_div(pred_distribution_g, target_distribution_g, reduction="sum", log_target=False)
-        kl_loss_b = f.kl_div(pred_distribution_b, target_distribution_b, reduction="sum", log_target=False)
-        kl_loss_a = f.kl_div(pred_distribution_a, target_distribution_a, reduction="sum", log_target=False)
-        kl_loss_s = f.kl_div(pred_distribution_s, target_distribution_s, reduction="sum", log_target=False)
+        target_distribution_s = f.log_softmax(s_out.flatten(start_dim=1), dim=-1)
+        kl_loss_r = f.kl_div(pred_distribution_r, target_distribution_r, reduction="sum", log_target=True)
+        kl_loss_g = f.kl_div(pred_distribution_g, target_distribution_g, reduction="sum", log_target=True)
+        kl_loss_b = f.kl_div(pred_distribution_b, target_distribution_b, reduction="sum", log_target=True)
+        kl_loss_a = f.kl_div(pred_distribution_a, target_distribution_a, reduction="sum", log_target=True)
+        kl_loss_s = f.kl_div(pred_distribution_s, target_distribution_s, reduction="sum", log_target=True)
 
         # Combine the separate KL divergence losses if desired
         kl_loss = kl_loss_r + kl_loss_g + kl_loss_b + kl_loss_a + kl_loss_s
@@ -1758,7 +1758,7 @@ class teacher(nn.Module):
                                ],dim=0)
         #print(final_loss.tolist())
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return (torch.mean(final_loss),
+        return (torch.sum(final_loss),
                 model.A*2*vsi_loss ,
                 model.B*entropy_loss*1e-2,
                 grad_penalty* 2e-2 ,

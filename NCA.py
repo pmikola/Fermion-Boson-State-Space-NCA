@@ -61,7 +61,7 @@ class NCA(nn.Module):
                 nn.ELU(alpha=1.),
                 nn.Linear(64, 32),
                 nn.ELU(alpha=1.),
-                nn.Linear(32, 4),
+                nn.Linear(32, 1),
                 # nn.ELU(alpha=1.),
                 #nn.ELU(alpha=1.),
             )
@@ -317,10 +317,10 @@ class NCA(nn.Module):
                 #dif.unsqueeze(1),
                 -0.1*sparsity_score.unsqueeze(1)
         ],dim=1)
-        temperature = self.NSC_layers[i](quality_score)
+        #temperature = self.NSC_layers[i](quality_score)
         # print(temperature.shape,quality_score.shape)
         # print(quality_score.shape)
-        quality_score = torch.softmax(torch.sum(quality_score / (temperature+1e-12), dim=1) ,dim=0).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.softmax(torch.sum(quality_score  , dim=1) ,dim=0).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 
