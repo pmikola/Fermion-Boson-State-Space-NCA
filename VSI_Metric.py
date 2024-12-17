@@ -7,7 +7,7 @@ from torch import nn
 
 # Note : https://ieeexplore.ieee.org/document/6873260
 class VS_ESSIM(torch.nn.Module):
-    def __init__(self, device,h=0.5, L=1., K1=200.):
+    def __init__(self, device,h=0.5, L=3., K1=200.):
         super().__init__()
         self.device = device
         self.h = h
@@ -27,7 +27,6 @@ class VS_ESSIM(torch.nn.Module):
                                        [0.34, -0.6, 0.17]], dtype=torch.float32).to(self.device)
 
     def forward(self, ref_img, dis_img,make_it_gray=False):
-
         if make_it_gray:
             ref_img = 0.299 * ref_img[:, 0:1] + 0.587 * ref_img[:, 1:2] + 0.114 * ref_img[:, 2:3]
             dis_img = 0.299 * dis_img[:, 0:1] + 0.587 * dis_img[:, 1:2] + 0.114 * dis_img[:, 2:3]
@@ -58,7 +57,7 @@ class VS_ESSIM(torch.nn.Module):
         similarity_map_lmn = (2 * grad1_lmn * grad2_lmn + C1) / (grad1_lmn**2 + grad2_lmn**2 + C1 + 1e-8)
         similarity_map_hvs = (2 * grad1_hvs * grad2_hvs + C2) / (grad1_hvs**2 + grad2_hvs**2 + C2 + 1e-8)
 
-        S = torch.abs(similarity_map_lmn)**alpha * torch.abs(similarity_map_hvs)**beta
+        S = (torch.abs(similarity_map_lmn)**alpha) ** (torch.abs(similarity_map_hvs)**beta)
         vsi_score = S.mean()
         return vsi_score
 
@@ -74,8 +73,8 @@ class VS_ESSIM(torch.nn.Module):
         return ref_img, dis_img
 
     def directional_gradient(self, img):
-        K1 = self.K1_kernel.unsqueeze(0).unsqueeze(0).expand(1, 3, 3, 3)
-        K2 = self.K2_kernel.unsqueeze(0).unsqueeze(0).expand(1, 3, 3, 3)
+        K1 = self.K1_kernel.unsqueeze(0).unsqueeze(0).expand(1, img.shape[1], 3, 3)
+        K2 = self.K2_kernel.unsqueeze(0).unsqueeze(0).expand(1, img.shape[1], 3, 3)
         gradients = torch.cat([F.conv2d(img, K1, padding=2), F.conv2d(img, K2, padding=2)], dim=1)
         gradients = gradients.permute(0, 2, 3, 1)
         return gradients

@@ -157,8 +157,8 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         time_in,time_out = meta_input_h2,meta_output_h2
         pos_in,pos_out = meta_input_h3,meta_output_h3
 
-        meta_to_uplift = torch.cat([time_in, time_out, t_stamps_binary, noise_var_in_binary,permeation_stamps_binary, noise_var_out, pos_in, pos_out], dim=-1)
-        # print(meta_to_uplift.shape)
+        meta_to_uplift = torch.cat([time_in, time_out, t_stamps_binary, noise_var_in_binary, noise_var_out, pos_in, pos_out,permeation_stamps_binary], dim=-1)
+
         meta_uplifted = self.act(self.uplift_meta_0(meta_to_uplift))
         meta_uplifted = self.act(self.uplift_meta_1(meta_uplifted))
         meta_uplifted = meta_uplifted.view(self.batch_size,5, self.in_scale,  self.in_scale)

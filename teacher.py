@@ -898,7 +898,7 @@ class teacher(nn.Module):
         plt.plot(self.fft_loss,label='fft_loss',marker='v')
         plt.plot(self.diff_loss,label='diff_loss')
         plt.plot(self.log_det_jacobian_loss,label='log_det_jacobian_loss')
-        #plt.plot(self.freq_loss,label='freq_loss')
+        plt.plot(self.freq_loss,label='freq_loss')
         # plt.plot(self.val_vsi_loss,label='val_vsi_loss',linestyle='--')
         # plt.plot(self.val_entropy_loss,label='val_entropy_loss',linestyle='--')
         # plt.plot(self.val_grad_penalty,label='val_grad_penalty',linestyle='--')
@@ -1184,6 +1184,7 @@ class teacher(nn.Module):
         self.num_of_epochs = num_epochs
         self.model.last_frame = self.last_frame
         model_to_Save = self.model
+        hard_save = 0
         if learning == 1:
             best_loss = float('inf')
             num_epochs = num_epochs
@@ -1243,7 +1244,7 @@ class teacher(nn.Module):
                     self.discriminator.noise_variance = 1 - ((1+self.epoch) / (1+self.num_of_epochs))
                 else:
                     self.discriminator.noise_variance = torch.rand((1,)).to(self.device)
-                disc_loss = self.discriminator_loss(m_idx, model_output, self.data_output,self.structure_output,criterion_disc)
+                disc_loss = self.discriminator_loss(m_idx, model_output,self.data_input, self.data_output,self.structure_input,self.structure_output,criterion_disc)
                 disc_optimizer.zero_grad(set_to_none=True)
                 disc_loss.backward()
                 disc_optimizer.step()
@@ -1314,9 +1315,11 @@ class teacher(nn.Module):
 
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
+                hard_save +=1
                 if epoch > 10:
-                    if val_loss[0] < min(self.val_loss[0:-2]) and loss[0] < min(self.train_loss[0:-2]):
+                    if val_loss[0] < min(self.val_loss[0:-2]) and loss[0] < min(self.train_loss[0:-2]) or hard_save == int(num_epochs/3):
                         model_to_Save = self.model
+                        hard_save = 0
                         print('saved_checkpoint')
 
                 if len(self.train_loss) > 20:
@@ -1684,25 +1687,22 @@ class teacher(nn.Module):
         grad_penalty = torch.mean(criterion.gradient_penalty(model))
 
         entropy_loss = 0
-        for pred_channel,true_channel_w ,true_channel,losses in zip([t.unsqueeze(1).unsqueeze(2)*pred_r, t.unsqueeze(1).unsqueeze(2)*pred_g, t.unsqueeze(1).unsqueeze(2)*pred_b, t.unsqueeze(1).unsqueeze(2)*pred_a, t.unsqueeze(1).unsqueeze(2)*pred_s],
-                                                                    [t_1.unsqueeze(1).unsqueeze(2)*r_out, t_1.unsqueeze(1).unsqueeze(2)*g_out, t_1.unsqueeze(1).unsqueeze(2)*b_out, t_1.unsqueeze(1).unsqueeze(2)*a_out, t_1.unsqueeze(1).unsqueeze(2)*s_out],
-                                                                    [r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
-
-            p_log_pred = f.log_softmax(pred_channel.flatten(), dim=0)
-            p_log_true = f.log_softmax(true_channel.flatten(), dim=0)
-            #p_log_true_w = f.log_softmax(true_channel_w.flatten(), dim=0)
-
-            p_pred = f.softmax(pred_channel.flatten(), dim=0)
-            p_true = f.softmax(true_channel.flatten(), dim=0)
-            #p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
-            entropy_pred = -torch.sum(p_pred * p_log_pred + 1e-9)
-            entropy_true = -torch.sum(p_true * p_log_true + 1e-9)
-            #entropy_true_w = -torch.sum(p_true_w * p_log_true_w + 1e-9)
-            entropy_loss += criterion(entropy_pred , entropy_true)
-            losses += entropy_loss
-
-
-
+        # for pred_channel,true_channel_w ,true_channel,losses in zip([t.unsqueeze(1).unsqueeze(2)*pred_r, t.unsqueeze(1).unsqueeze(2)*pred_g, t.unsqueeze(1).unsqueeze(2)*pred_b, t.unsqueeze(1).unsqueeze(2)*pred_a, t.unsqueeze(1).unsqueeze(2)*pred_s],
+        #                                                             [t_1.unsqueeze(1).unsqueeze(2)*r_out, t_1.unsqueeze(1).unsqueeze(2)*g_out, t_1.unsqueeze(1).unsqueeze(2)*b_out, t_1.unsqueeze(1).unsqueeze(2)*a_out, t_1.unsqueeze(1).unsqueeze(2)*s_out],
+        #                                                             [r_out, g_out, b_out, a_out, s_out],[r_loss,g_loss,b_loss,a_loss,s_loss]):
+        #
+        #     p_log_pred = f.log_softmax(pred_channel.flatten(), dim=0)
+        #     p_log_true = f.log_softmax(true_channel.flatten(), dim=0)
+        #     #p_log_true_w = f.log_softmax(true_channel_w.flatten(), dim=0)
+        #
+        #     p_pred = f.softmax(pred_channel.flatten(), dim=0)
+        #     p_true = f.softmax(true_channel.flatten(), dim=0)
+        #     #p_true_w = f.softmax(true_channel_w.flatten(), dim=0)
+        #     entropy_pred = -torch.sum(p_pred * p_log_pred + 1e-9)
+        #     entropy_true = -torch.sum(p_true * p_log_true + 1e-9)
+        #     #entropy_true_w = -torch.sum(p_true_w * p_log_true_w + 1e-9)
+        #     entropy_loss += criterion(entropy_pred , entropy_true)
+        #     losses += entropy_loss
 
         self.loss_coeffs[0] = r_loss.mean().item()
         self.loss_coeffs[1] = g_loss.mean().item()
@@ -1712,12 +1712,12 @@ class teacher(nn.Module):
 
         rgb_pred = torch.cat([pred_r.unsqueeze(1),pred_g.unsqueeze(1),pred_b.unsqueeze(1)],dim=1)
         rgb_true = torch.cat([r_out.unsqueeze(1),g_out.unsqueeze(1),b_out.unsqueeze(1)],dim=1)
-        rgb_pred = rgb_pred - rgb_pred.min()
-        rgb_pred = rgb_pred / rgb_pred.max()
-        rgb_true = rgb_true - rgb_true.min()
-        rgb_true = rgb_true / rgb_true.max()
-        rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.)#.clamp(0,1)
-        rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.)#.clamp(0,1)
+        # rgb_pred = rgb_pred - rgb_pred.min()
+        # rgb_pred = rgb_pred / rgb_pred.max()
+        # rgb_true = rgb_true - rgb_true.min()
+        # rgb_true = rgb_true / rgb_true.max()
+        rgb_pred = torch.nan_to_num(rgb_pred, nan=0.,posinf=0.,neginf=0.).clamp(0,3)
+        rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.).clamp(0,3)
 
         #print(t*rgb_pred.max(),t_1*rgb_true.max(),t*rgb_pred.min(),t_1*rgb_true.min(),rgb_true.min(),rgb_true.max())
         vsi_loss = self.vsi(rgb_true,rgb_pred)
@@ -1728,37 +1728,24 @@ class teacher(nn.Module):
         self.loss_coeffs = f.softmax((normalized_loss_coeffs.max()-normalized_loss_coeffs) / temperature,dim=0)
         #print( self.loss_coeffs)
         disc_loss = -torch.log(self.disc_loss[-1])
-
-        # if self.epoch == 5:
-        #     ls = [vsi_loss ,entropy_loss   , kl_loss  , sink_loss  , diff_fft_loss  , critical_loss  , diff_loss  , fft_loss  ,  value_loss , ortho_mean  , log_det_jacobian_loss.mean()  , b_loss  , hf_e_loss  , freq_loss.mean()]
-        #     adjusted_coeffs = [1 / loss if loss != 0 else 0 for loss in ls]
-        #     A, B, C, D, E, F, G, H, I, J, K, L, M,N = adjusted_coeffs
-        #     model.A, model.B, model.C, model.D, model.E, model.F, model.G, model.H, model.I, model.J, model.K, model.L, model.M,model.N = A.detach(), B.detach(), C.detach(), D.detach(), E.detach(), F.detach(), G.detach(), H.detach(), I.detach(), J.detach(), K.detach(),L.detach(), M.detach(),N.detach()
-            #scaled_losses = [coeff * loss for coeff, loss in zip(adjusted_coeffs, ls)]
-        # lw_min = lw.min()
-        # lw_range = lw.max() - loss_min + 1e-12
-        # normalized_lw_coeffs = (lw - lw_min) / lw_range
-        # temperature = 30.# + 0.5 * normalized_lw_coeffs.std().item()
-        # lw = f.softmax((normalized_lw_coeffs.max() - normalized_lw_coeffs) / temperature, dim=0)
-        #final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
-        # final_loss =vsi_loss*2+disc_loss+entropy_loss*5e-2+grad_penalty*2e-2+kl_loss*5e-6+sink_loss*8e-1+diff_fft_loss*1e3+critical_loss*2e-1+diff_loss*1e1+fft_loss*2e4+2e1*value_loss+ortho_mean*1e-4+log_det_jacobian_loss.mean()*1e-6+b_loss*1e-5+hf_e_loss*5e-1+freq_loss.mean()*1e-3
+        d_loss = torch.abs((disc_loss.mean().unsqueeze(0)**2)-(disc_loss.mean().unsqueeze(0))+(0.5**2))
 
         final_loss = torch.cat([vsi_loss.mean().unsqueeze(0)*2 * model.A.unsqueeze(0) ,
-                                torch.abs((disc_loss.mean().unsqueeze(0)**2)-(disc_loss.mean().unsqueeze(0))+(0.5**2))*20,
-                                entropy_loss.mean().unsqueeze(0)*1e-2 * model.B.unsqueeze(0) ,
+                                d_loss,
+                                #entropy_loss.mean().unsqueeze(0)*1e-2 * model.B.unsqueeze(0) ,
                                 grad_penalty.mean().unsqueeze(0) * 2e-2 ,
                                 kl_loss.mean().unsqueeze(0)*1e-1 * model.C.unsqueeze(0) ,
                                 sink_loss.mean().unsqueeze(0)*2e-1 * model.D.unsqueeze(0) ,
-                                diff_fft_loss.mean().unsqueeze(0)*1e3 * model.E.unsqueeze(0) ,
+                                diff_fft_loss.mean().unsqueeze(0)*5e3 * model.E.unsqueeze(0) ,
                                 critical_loss.mean().unsqueeze(0)*2e-1 * model.F.unsqueeze(0) ,
-                                diff_loss.mean().unsqueeze(0)*1e1 * model.G.unsqueeze(0) ,
+                                diff_loss.mean().unsqueeze(0)*3e1 * model.G.unsqueeze(0) ,
                                 fft_loss.mean().unsqueeze(0)*5e3 * model.H.unsqueeze(0) ,
                                 model.I.unsqueeze(0) * 2e1*value_loss.mean().unsqueeze(0) ,
                                 ortho_mean.mean().unsqueeze(0)*1e-4 * model.J.unsqueeze(0) ,
                                 log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
                                 boundary_loss.mean()*5e-1 * model.L.unsqueeze(0) ,
-                                hf_e_loss.mean().unsqueeze(0)*5e-1 * model.M.unsqueeze(0) ,
-                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
+                                hf_e_loss.mean().unsqueeze(0)*3e-1 * model.M.unsqueeze(0) ,
+                                #freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
                                ],dim=0)
         #print(final_loss.tolist())
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
@@ -1769,14 +1756,75 @@ class teacher(nn.Module):
                 model.C*1e-1*kl_loss,
                 sink_loss* model.D*2e-1,
                 critical_loss* model.F*2e-1,
-                hf_e_loss* model.M*5e-1,
+                hf_e_loss* model.M*3e-1,
                 boundary_loss* model.L*5e-1,
                 2e1*value_loss* model.I,
-                diff_fft_loss* model.E*1e3,
+                diff_fft_loss* model.E*5e3,
                 fft_loss* model.H*5e3,
-                model.G*1e1*diff_loss,
-                log_det_jacobian_loss.mean()* model.K*1e-6,
+                model.G*3e1*diff_loss,
+                log_det_jacobian_loss.mean() * model.K*1e-6,
                 model.N*freq_loss.mean()*1e-3)
+
+    def discriminator_loss(self, idx, model_output,data_input, data_output,structure_input, structure_output, criterion):
+
+        dataset = (
+            self.data_input[idx], self.structure_input[idx], self.meta_input_h1[idx], self.meta_input_h2[idx],
+            self.meta_input_h3[idx], self.meta_input_h4[idx], self.meta_input_h5[idx], self.noise_diff_in[idx],
+            self.t_stamps_binary[idx],self.permeation_stamps_binary[idx],self.meta_output_h1[idx],
+            self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
+            self.noise_diff_out[idx])
+
+        pred_r, pred_g, pred_b, pred_a, pred_s, _, _,_,_,_,_,_ = model_output
+
+        t = self.t_stamps[idx].unsqueeze(1)
+        t_1 = 1 - self.t_stamps[idx].unsqueeze(1)
+
+        rp = 1 - self.permeation_stamps[idx].unsqueeze(1)
+        rt = self.permeation_stamps[idx].unsqueeze(1)
+
+        r_in = data_input[:, 0:self.model.in_scale, :][idx].detach()
+        g_in = data_input[:, self.model.in_scale:self.model.in_scale * 2, :][idx].detach()
+        b_in = data_input[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx].detach()
+        a_in = data_input[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx].detach()
+        s_in = structure_input[idx].detach()
+
+        r_out = data_output[:, 0:self.model.in_scale, :][idx].detach()
+        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx].detach()
+        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx].detach()
+        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx].detach()
+        s_out = structure_output[idx].detach()
+
+        pred_r = (t_1 * pred_r + r_in * t)
+        pred_g = (t_1 * pred_g + g_in * t)
+        pred_b = (t_1 * pred_b + b_in * t)
+        pred_a = (t_1 * pred_a + a_in * t)
+        pred_s = (t_1 * pred_s + s_in * t)
+
+        pred_r = (rt * r_out + pred_r * rp)
+        pred_g = (rt * g_out + pred_g * rp)
+        pred_b = (rt * b_out + pred_b * rp)
+        pred_a = (rt * a_out + pred_a * rp)
+        pred_s = (rt * s_out + pred_s * rp)
+
+        pred = torch.cat([pred_r.detach().unsqueeze(1), pred_g.detach().unsqueeze(1), pred_b.detach().unsqueeze(1), pred_a.detach().unsqueeze(1), pred_s.detach().unsqueeze(1)], dim=1)
+        true = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1), s_out.unsqueeze(1)], dim=1)
+        # Note : Fill value for label smoothing
+        fake_labels = torch.rand((pred.shape[0], 1)).to(self.device) * 0.15
+        true_labels = 0.85 + torch.rand((true.shape[0], 1)).to(self.device) * 0.15
+        combined_data = torch.cat([pred, true], dim=0)
+
+        # _,_, h, w = combined_data.shape
+        # mask = torch.ones_like(combined_data, device=self.device)
+        # center_x, center_y = w // 2, h // 2
+        # mask_radius = torch.randint(0,5,(1,))
+        # mask[:, :, center_y-mask_radius:center_y+mask_radius+1, center_x-mask_radius:center_x+mask_radius+1] = 0.0
+        # combined_data = combined_data * mask
+        combined_labels = torch.cat([fake_labels, true_labels], dim=0)
+        shuffle_idx = torch.randint(0, combined_data.shape[0], (int(combined_data.shape[0] / 2),)).to(self.device)
+        shuffled_labels = combined_labels[shuffle_idx]
+        disc_pred = self.discriminator(combined_data, dataset, shuffle_idx)
+        disc_loss = criterion(disc_pred, shuffled_labels)
+        return disc_loss
 
 
     def boundary_loss(self,pred, target):
@@ -1860,40 +1908,7 @@ class teacher(nn.Module):
             data = torch.fft.ifft2(high_freq_pred_shifted, s=(H, W), dim=(-2, -1)).real
             return data
 
-    def discriminator_loss(self, idx, model_output, data_output, structure_output, criterion):
 
-        dataset = (
-            self.data_input[idx], self.structure_input[idx], self.meta_input_h1[idx], self.meta_input_h2[idx],
-            self.meta_input_h3[idx], self.meta_input_h4[idx], self.meta_input_h5[idx], self.noise_diff_in[idx],
-            self.t_stamps_binary[idx],self.permeation_stamps_binary[idx],self.meta_output_h1[idx],
-            self.meta_output_h2[idx], self.meta_output_h3[idx], self.meta_output_h4[idx], self.meta_output_h5[idx],
-            self.noise_diff_out[idx])
-
-        pred_r, pred_g, pred_b, pred_a, pred_s, _, _,_,_,_,_,_ = model_output
-        r_out = data_output[:, 0:self.model.in_scale, :][idx].detach()
-        g_out = data_output[:, self.model.in_scale:self.model.in_scale * 2, :][idx].detach()
-        b_out = data_output[:, self.model.in_scale * 2:self.model.in_scale * 3, :][idx].detach()
-        a_out = data_output[:, self.model.in_scale * 3:self.model.in_scale * 4, :][idx].detach()
-        s_out = structure_output[idx].detach()
-
-        pred = torch.cat([pred_r.detach().unsqueeze(1), pred_g.detach().unsqueeze(1), pred_b.detach().unsqueeze(1), pred_a.detach().unsqueeze(1), pred_s.detach().unsqueeze(1)], dim=1)
-        true = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1), s_out.unsqueeze(1)], dim=1)
-        # Note : Fill value for label smoothing
-        fake_labels = torch.rand((pred.shape[0], 1)).to(self.device) * 0.15
-        true_labels = 0.85 + torch.rand((true.shape[0], 1)).to(self.device) * 0.15
-        combined_data = torch.cat([pred, true], dim=0)
-        # _,_, h, w = combined_data.shape
-        # mask = torch.ones_like(combined_data, device=self.device)
-        # center_x, center_y = w // 2, h // 2
-        # mask_radius = torch.randint(0,5,(1,))
-        # mask[:, :, center_y-mask_radius:center_y+mask_radius+1, center_x-mask_radius:center_x+mask_radius+1] = 0.0
-        # combined_data = combined_data * mask
-        combined_labels = torch.cat([fake_labels, true_labels], dim=0)
-        shuffle_idx = torch.randint(0, combined_data.shape[0], (int(combined_data.shape[0] / 2),)).to(self.device)
-        shuffled_labels = combined_labels[shuffle_idx]
-        disc_pred = self.discriminator(combined_data, dataset, shuffle_idx)
-        disc_loss = criterion(disc_pred, shuffled_labels)
-        return disc_loss
 
     @staticmethod
     def seed_setter(seed):

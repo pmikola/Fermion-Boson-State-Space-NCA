@@ -669,11 +669,11 @@ class NCA(nn.Module):
 class FermionConvLayer(nn.Module):
     def __init__(self, channels,propagation_steps, kernel_size=3):
         super(FermionConvLayer, self).__init__()
-        self.fermion_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.fermion_gate_0 = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
         self.fermion_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
         # Note: Normalising flow
-        self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
-        self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.scale = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
+        self.shift = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
         self.act = nn.ELU(alpha=1.)
         self.kernel_size= kernel_size
@@ -686,8 +686,8 @@ class FermionConvLayer(nn.Module):
 
     def forward(self, x,meta,idx, weights):
         w_len = len(weights)
-        scale = torch.sigmoid(self.scale_net(x))
-        shift = self.shift_net(x)
+        scale = torch.sigmoid(self.scale(x))
+        shift = self.act(self.shift(x))
         transformed_x = scale * x + shift
         log_det_jacobian = torch.sum(torch.log(scale), dim=[1, 2, 3, 4])
         f_o = [self.act(torch.nn.functional.conv3d(transformed_x, w, padding=w.shape[-1]//2 )) for w in weights]
@@ -704,10 +704,10 @@ class FermionConvLayer(nn.Module):
 class BosonConvLayer(nn.Module):
     def __init__(self, channels,propagation_steps, kernel_size=3):
         super(BosonConvLayer, self).__init__()
-        self.boson_gate_0 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.boson_gate_0 = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
         self.boson_gate_1 = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
-        self.scale_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
-        self.shift_net = nn.Conv3d(channels, channels, kernel_size=1, bias=True)
+        self.scale = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
+        self.shift = nn.Conv3d(channels, channels,  kernel_size=3, stride=1, padding=1, bias=True)
         #self.threshold = nn.Parameter(torch.rand(propagation_steps))
         self.act = nn.ELU(alpha=1.)
         self.kernel_size = kernel_size
@@ -720,8 +720,8 @@ class BosonConvLayer(nn.Module):
 
     def forward(self, x,meta,idx, weights):
         w_len = len(weights)
-        scale = torch.sigmoid(self.scale_net(x))
-        shift = self.shift_net(x)
+        scale = torch.sigmoid(self.scale(x))
+        shift = self.act(self.shift(x))
         transformed_x = scale * x + shift
         log_det_jacobian = torch.sum(torch.log(scale), dim=[1, 2, 3, 4])
         b_o = [self.act(torch.nn.functional.conv3d(transformed_x, w, padding=w.shape[-1] // 2)) for w in weights]
