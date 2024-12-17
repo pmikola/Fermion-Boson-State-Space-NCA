@@ -46,7 +46,7 @@ class teacher(nn.Module):
         self.field_names = None
         self.no_frame_samples, self.first_frame, self.last_frame, self.frame_skip = None, None, None, None
        # self.ssim_loss = SSIM(data_range=1., channel=5,nonnegative_ssim=True,K=(0.01, 0.1),win_size=7).to(self.device)
-        self.vsi = VS_ESSIM().to(self.device)
+        self.vsi = VS_ESSIM(self.device)
         self.sinkhorn_loss = SamplesLoss("sinkhorn", p=2, blur=0.05, scaling=0.9)
 
         self.data_input = None
@@ -1314,8 +1314,8 @@ class teacher(nn.Module):
 
                 # t_stop = time.perf_counter()
                 t += (t_pred - t_start) / 4
-                if epoch > 25:
-                    if val_loss[0] < min(self.val_loss[:-1]):
+                if epoch > 10:
+                    if val_loss[0] < min(self.val_loss[0:-2]) and loss[0] < min(self.train_loss[0:-2]):
                         model_to_Save = self.model
                         print('saved_checkpoint')
 
@@ -1379,6 +1379,7 @@ class teacher(nn.Module):
         else:
             self.model.load_state_dict(torch.load('model.pt'))
 
+        #model_to_Save = self.model
         time.sleep(1)
         torch.save(model_to_Save.state_dict(), 'model.pt')
         print('model_saved on disk')
@@ -1392,7 +1393,10 @@ class teacher(nn.Module):
                          criterion,norm='backward'):
         pred_r, pred_g, pred_b, pred_a, pred_s, deepS, nca_var,ortho_mean,ortho_max,log_det_jacobian_loss,freq_loss, lw = model_output
 
-        t = self.t_stamps[idx].unsqueeze(1)
+        # t = torch.tensor([0.]).to(self.device)
+        # t_1 = torch.tensor([1.]).to(self.device)
+
+        t =  self.t_stamps[idx].unsqueeze(1)
         t_1 = 1 - self.t_stamps[idx].unsqueeze(1)
 
         rp = 1 - self.permeation_stamps[idx].unsqueeze(1)
@@ -1716,7 +1720,7 @@ class teacher(nn.Module):
         rgb_true = torch.nan_to_num(rgb_true, nan=0.,posinf=0.,neginf=0.)#.clamp(0,1)
 
         #print(t*rgb_pred.max(),t_1*rgb_true.max(),t*rgb_pred.min(),t_1*rgb_true.min(),rgb_true.min(),rgb_true.max())
-        vsi_loss = self.vsi(rgb_pred,rgb_true)
+        vsi_loss = self.vsi(rgb_true,rgb_pred)
         loss_min = self.loss_coeffs.min()
         loss_range = self.loss_coeffs.max() - loss_min + 1e-12
         normalized_loss_coeffs = (self.loss_coeffs - loss_min) / loss_range
