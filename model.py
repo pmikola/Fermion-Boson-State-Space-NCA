@@ -32,8 +32,9 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.nca_steps = nca_steps
         self.act = nn.ELU(alpha=1.0)
         self.A, self.B, self.C, self.D, self.E, self.F, self.G, self.H, self.I, self.J, self.K, self.L, self.M, self.N = torch.nn.Parameter(torch.full((14,),1.),requires_grad=True).to(self.device)
-        self.xchannels = 5
-        self.xxchannels = 3
+        self.xchannels = 10
+        self.xxchannels = 5
+        self.xxxchannels = 2
         # self.act = nn.GELU()
         self.NCA = NCA(self.batch_size,self.hdc_dim, self.nca_steps, self.device)
         self.downlift_data = nn.Conv3d(in_channels=self.hdc_dim,out_channels=self.hdc_dim,kernel_size=1)
@@ -63,17 +64,17 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
         self.a_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
         self.s_h = nn.Conv2d(in_channels=self.xchannels, out_channels=self.xxchannels,kernel_size=1)
 
-        self.r_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
-        self.g_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
-        self.b_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
-        self.a_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
-        self.s_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxchannels, kernel_size=1)
+        self.r_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxxchannels, kernel_size=1)
+        self.g_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxxchannels, kernel_size=1)
+        self.b_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxxchannels, kernel_size=1)
+        self.a_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxxchannels, kernel_size=1)
+        self.s_hh = nn.Conv2d(in_channels=self.xxchannels, out_channels=self.xxxchannels, kernel_size=1)
 
-        self.r_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
-        self.g_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
-        self.b_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
-        self.a_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
-        self.s_o = nn.Conv2d(in_channels=self.xxchannels, out_channels=1, kernel_size=1)
+        self.r_o = nn.Conv2d(in_channels=self.xxxchannels, out_channels=1, kernel_size=1)
+        self.g_o = nn.Conv2d(in_channels=self.xxxchannels, out_channels=1, kernel_size=1)
+        self.b_o = nn.Conv2d(in_channels=self.xxxchannels, out_channels=1, kernel_size=1)
+        self.a_o = nn.Conv2d(in_channels=self.xxxchannels, out_channels=1, kernel_size=1)
+        self.s_o = nn.Conv2d(in_channels=self.xxxchannels, out_channels=1, kernel_size=1)
         #self.feedback_weights = nn.Parameter(torch.rand(10))
         self.init_weights()
 
@@ -120,7 +121,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
                         if submodule.bias is not None:
                             nn.init.constant_(submodule.bias, 0.0)
 
-        print("Weight initialization complete")
+        print("Weight initialization in main model complete")
 
     def weight_reset(self: nn.Module):
         reset_parameters = getattr(self, "reset_parameters", None)
@@ -216,7 +217,7 @@ class Fermionic_Bosonic_Space_State_NCA(nn.Module):
             # hf_loss +=self.fft_high_frequency_loss(self.a_h.weight,hf_data)
             # hf_loss +=self.fft_high_frequency_loss(self.s_h.weight,hf_data)
             hf_loss = sum(self.fft_high_frequency_loss(layer.weight, hf_data) / layer.weight.numel() for layer in
-                          [self.r_h, self.g_h, self.b_h, self.a_h, self.s_h])
+                          [self.r_hh, self.g_hh, self.b_hh, self.a_hh, self.s_hh])
 
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.r]), dim=0)
             # hf_loss += torch.sum(torch.stack([self.fft_high_frequency_loss(layer.weight,hf_data) for layer in self.g]), dim=0)

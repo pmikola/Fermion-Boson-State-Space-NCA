@@ -1214,6 +1214,7 @@ class teacher(nn.Module):
                 self.seed_setter(int(epoch + 1))
                 if reiterate_data == 0:
                     self.data_preparation()
+                    self.model.NCA.Reinforcer.reward = torch.tensor([1], device=self.device)
                     print("new sets of data prepared!")
                 else:
                     reiterate_counter += 1
@@ -1260,6 +1261,7 @@ class teacher(nn.Module):
                 loss[0].backward()
                 optimizer.step()
 
+                self.model.NCA.Reinforcer.replay_memory()
                 if self.validation_dataset is not None:
                     with torch.no_grad():
                         val_model_output = self.model(self.validation_dataset, spiking_probabilities)
@@ -1457,6 +1459,11 @@ class teacher(nn.Module):
         pred_b = (rt * b_out + pred_b * rp)
         pred_a = (rt * a_out + pred_a * rp)
         pred_s = (rt * s_out + pred_s * rp)
+
+        pred_reward = torch.cat([pred_r.unsqueeze(1), pred_g.unsqueeze(1), pred_b.unsqueeze(1), pred_a.unsqueeze(1),pred_s.unsqueeze(1)], dim=1)
+        true_reward = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1),s_out.unsqueeze(1)], dim=1)
+
+        self.model.NCA.Reinforcer.calculate_reward(pred_reward,true_reward)
 
         pred_r[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
         pred_g[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
@@ -1745,11 +1752,11 @@ class teacher(nn.Module):
                                 log_det_jacobian_loss.mean().unsqueeze(0)*1e-6 * model.K.unsqueeze(0) ,
                                 boundary_loss.mean()*5e-1 * model.L.unsqueeze(0) ,
                                 hf_e_loss.mean().unsqueeze(0)*3e-1 * model.M.unsqueeze(0) ,
-                                #freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
+                                freq_loss.mean().unsqueeze(0)*1e-3 * model.N.unsqueeze(0),
                                ],dim=0)
         #print(final_loss.tolist())
         #print(disc_loss.item(),entropy_loss.item()*5e-2,grad_penalty.item()*2e-2,kl_loss.item()*5e-6,sink_loss.item()*8e-1,torch.mean(diff_fft_loss).item()*1e3,critical_loss.item()*2e-1,torch.mean(diff_loss).item()*3e1,torch.mean(fft_loss).item()*2e4,2e1*torch.mean(value_loss).item(),ortho_mean.item()*1e-4,log_det_jacobian_loss.mean().item()*1e-5,b_loss.item()*1e-5,hf_e_loss.item()*5e-1,freq_loss.mean().item()*1e-3)
-        return (torch.sum(final_loss),
+        return (torch.mean(final_loss),
                 model.A*2*vsi_loss ,
                 model.B*entropy_loss*1e-2,
                 grad_penalty* 2e-2 ,

@@ -6,7 +6,9 @@ import torch
 from linformer import Linformer
 from matplotlib import pyplot as plt, animation
 from scipy.constants import fermi
-from torch import nn
+from torch import nn, dtype
+
+from Reinforcer import Reinforcer
 from WaveletModel import WaveletModel
 from torch.nn.utils import spectral_norm as sn
 matplotlib.use('TkAgg')
@@ -29,7 +31,10 @@ class NCA(nn.Module):
         self.fermion_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.boson_kernels_size = torch.arange(1, self.kernel_size + 1, 2)
         self.act = nn.ELU(alpha=1.)
-
+        self.memory_size = 32
+        self.Reinforcer = Reinforcer(self.batch_size, self.channels, self.num_steps, self.memory_size, self.device)
+        self.fermion_flag = torch.ones((1,)).to(self.device)
+        self.boson_flag = -torch.ones((1,)).to(self.device)
         # self.fig3d = plt.figure(figsize=(6, 6))
         # self.ax3d = self.fig3d.add_subplot(111, projection='3d')
         self.fig2d, self.axs2d = plt.subplots(6, self.num_steps*2, figsize=(13, 6))
@@ -53,7 +58,7 @@ class NCA(nn.Module):
 
         self.NSC_layers = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(4, 64),
+                nn.Linear(5, 64),
                 nn.ELU(alpha=1.),
                 nn.Linear(64, 128),
                 nn.ELU(alpha=1.),
@@ -61,7 +66,7 @@ class NCA(nn.Module):
                 nn.ELU(alpha=1.),
                 nn.Linear(64, 32),
                 nn.ELU(alpha=1.),
-                nn.Linear(32, 1),
+                nn.Linear(32, 4),
                 # nn.ELU(alpha=1.),
                 #nn.ELU(alpha=1.),
             )
@@ -183,11 +188,15 @@ class NCA(nn.Module):
                 boson_kernels = self.act(self.project_bosons_feature(boson_kernels))
                 past_boson_kernels.append(boson_kernels)
 
-                fermion_quality = self.evaluate_kernel_quality(fermion_kernels,boson_kernels,past_fermion_kernels,i)
-                boson_quality = self.evaluate_kernel_quality(boson_kernels,fermion_kernels,past_boson_kernels,i)
+                fermion_quality = self.evaluate_kernel_quality(self.fermion_flag,fermion_kernels,boson_kernels,past_fermion_kernels,i)
+                boson_quality = self.evaluate_kernel_quality(self.boson_flag,boson_kernels,fermion_kernels,past_boson_kernels,i)
 
-                fermion_kernels = fermion_kernels * fermion_quality
-                boson_kernels = boson_kernels * boson_quality
+                particles_quality = torch.cat([fermion_quality,boson_quality],dim=1).detach()
+                state = torch.cat([fermion_kernels, boson_kernels], dim=1).detach(),particles_quality,torch.tensor([i], dtype=torch.float).to(self.device).expand(self.batch_size, 1, 1).detach()
+                action = self.Reinforcer(state)
+                self.Reinforcer.remember(state,action)
+                fermion_kernels = fermion_kernels * action #fermion_quality
+                boson_kernels = boson_kernels * action #boson_quality
                 boson_kernels= torch.mean(boson_kernels,dim=0)
                 fermion_kernels = torch.mean(fermion_kernels, dim=0)
                 l_idx = 0
@@ -258,8 +267,6 @@ class NCA(nn.Module):
         x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss = self.nca_update(x,meta_embeddings,spiking_probabilities,hf_data,batch_size)
         return x,nca_var,ortho_mean,ortho_max,log_det_jacobian,freq_loss
 
-
-
     def fft_high_frequency_loss(self,kernels,hf_data, cutoff_ratio=0.7):
         C,HDC, H, W, D = kernels.shape
         fft_k = torch.fft.fftn(kernels)
@@ -292,7 +299,7 @@ class NCA(nn.Module):
         ortho_max = torch.mean(max_off_diagonal)
         return ortho_mean, ortho_max
 
-    def evaluate_kernel_quality(self, kernels,comm_kernels,past_kernels,i):
+    def evaluate_kernel_quality(self,flag, kernels,comm_kernels,past_kernels,i):
         kernels = kernels.detach()
         comm_kernels = comm_kernels.detach()
         sparsity_score = torch.mean(torch.abs(kernels), dim=[1, 2]) / (torch.norm(kernels, dim=[1, 2], p=1) + 1e-6)
@@ -307,6 +314,7 @@ class NCA(nn.Module):
         else:
             #mutual_info_score = self.mutual_information_score(kernels,past_kernels[-2].detach())
             temp_coherence = self.temporal_coherence(kernels, past_kernels[-2].detach())
+        flag = flag.expand(self.batch_size, 1)
         quality_score = torch.cat([
                 0.5*variance_score.unsqueeze(1),
                 0.5*temp_coherence.unsqueeze(1),
@@ -315,12 +323,13 @@ class NCA(nn.Module):
                 0.5*E_c.unsqueeze(1),
                 #-0.5*mutual_info_score.unsqueeze(1),
                 #dif.unsqueeze(1),
-                -0.1*sparsity_score.unsqueeze(1)
+                -0.1*sparsity_score.unsqueeze(1),
+                flag
         ],dim=1)
-        #temperature = self.NSC_layers[i](quality_score)
+        NCS_quality_score = self.NSC_layers[i](quality_score)
         # print(temperature.shape,quality_score.shape)
         # print(quality_score.shape)
-        quality_score = torch.softmax(torch.sum(quality_score  , dim=1) ,dim=0).unsqueeze(1).unsqueeze(2)
+        quality_score = torch.sum(NCS_quality_score  , dim=1).unsqueeze(1).unsqueeze(2)
         # print(quality_score.shape)
         return quality_score
 

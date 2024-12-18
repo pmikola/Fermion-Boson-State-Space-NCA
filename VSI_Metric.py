@@ -7,7 +7,7 @@ from torch import nn
 
 # Note : https://ieeexplore.ieee.org/document/6873260
 class VS_ESSIM(torch.nn.Module):
-    def __init__(self, device,h=0.5, L=3., K1=200.):
+    def __init__(self, device,h=0.5, L=1., K1=200.):
         super().__init__()
         self.device = device
         self.h = h
@@ -57,7 +57,7 @@ class VS_ESSIM(torch.nn.Module):
         similarity_map_lmn = (2 * grad1_lmn * grad2_lmn + C1) / (grad1_lmn**2 + grad2_lmn**2 + C1 + 1e-8)
         similarity_map_hvs = (2 * grad1_hvs * grad2_hvs + C2) / (grad1_hvs**2 + grad2_hvs**2 + C2 + 1e-8)
 
-        S = (torch.abs(similarity_map_lmn)**alpha) ** (torch.abs(similarity_map_hvs)**beta)
+        S = (torch.abs(similarity_map_lmn)**alpha) * (torch.abs(similarity_map_hvs)**beta)
         vsi_score = S.mean()
         return vsi_score
 
