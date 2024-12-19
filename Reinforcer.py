@@ -110,9 +110,10 @@ class Reinforcer(nn.Module):
             Q_next = self.forward((particles_space, particles_quality, iteration))
             step_loss = self.loss_fn(Q_next, actions[i]) + (Q_next - discounted_rewards_s).pow(2).mean()
             loss += step_loss*1e-12
-        print(loss)
         loss.backward()
         self.optimizer.step()
+        return loss
+
 
 
     def forward(self, state):

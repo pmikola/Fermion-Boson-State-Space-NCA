@@ -1214,7 +1214,8 @@ class teacher(nn.Module):
                 self.seed_setter(int(epoch + 1))
                 if reiterate_data == 0:
                     self.data_preparation()
-                    self.model.NCA.Reinforcer.reward = torch.tensor([1], device=self.device)
+                    self.model.NCA.Reinforcer_f.reward = torch.tensor([1], device=self.device)
+                    self.model.NCA.Reinforcer_b.reward = torch.tensor([1], device=self.device)
                     print("new sets of data prepared!")
                 else:
                     reiterate_counter += 1
@@ -1261,7 +1262,8 @@ class teacher(nn.Module):
                 loss[0].backward()
                 optimizer.step()
 
-                self.model.NCA.Reinforcer.replay_memory()
+                loss_f = self.model.NCA.Reinforcer_f.replay_memory()
+                _ = self.model.NCA.Reinforcer_b.replay_memory()
                 if self.validation_dataset is not None:
                     with torch.no_grad():
                         val_model_output = self.model(self.validation_dataset, spiking_probabilities)
@@ -1374,6 +1376,7 @@ class teacher(nn.Module):
                         f'vL: {val_loss[0].item():.6f}, '
                         f'mL: {loss[0].item():.6f}, '
                         f'dL: {disc_loss.item():.6f}, '
+                        f'RlL:{loss_f.item():.6f},'
                         f'tpf: {((self.fsim.grid_size_x * self.fsim.grid_size_y) / (self.model.in_scale ** 2)) * (t * 1e3 / print_every_nth_frame / self.batch_size):.2f} [ms] \n'
                         f'CPU TEMP: {cpu_temp} [°C], '
                         f'GPU TEMP: {gpu_temp} [°C], '
@@ -1463,7 +1466,8 @@ class teacher(nn.Module):
         pred_reward = torch.cat([pred_r.unsqueeze(1), pred_g.unsqueeze(1), pred_b.unsqueeze(1), pred_a.unsqueeze(1),pred_s.unsqueeze(1)], dim=1)
         true_reward = torch.cat([r_out.unsqueeze(1), g_out.unsqueeze(1), b_out.unsqueeze(1), a_out.unsqueeze(1),s_out.unsqueeze(1)], dim=1)
 
-        self.model.NCA.Reinforcer.calculate_reward(pred_reward,true_reward)
+        self.model.NCA.Reinforcer_f.calculate_reward(pred_reward,true_reward)
+        self.model.NCA.Reinforcer_b.calculate_reward(pred_reward,true_reward)
 
         pred_r[c_idx_pool[r_c_idx]] = mask[c_idx_pool[r_c_idx]]
         pred_g[c_idx_pool[g_c_idx]] = mask[c_idx_pool[g_c_idx]]
