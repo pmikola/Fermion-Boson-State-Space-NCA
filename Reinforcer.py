@@ -71,7 +71,7 @@ class Reinforcer(nn.Module):
         self.memory.append([state,action,self.reward.detach()])
 
     def calculate_reward(self,pred,true):
-        t_check = (torch.abs(pred - true) <= 1e-6)
+        t_check = (torch.abs(pred - true) <= 1e-3)
         self.reward = t_check.sum().view(1).detach()
 
     def sample_memory(self, sample_size):
@@ -109,8 +109,8 @@ class Reinforcer(nn.Module):
             particles_space, particles_quality, iteration = states[i]
             Q_next = self.forward((particles_space, particles_quality, iteration))
             step_loss = self.loss_fn(Q_next, actions[i]) + (Q_next - discounted_rewards_s).pow(2).mean()
-            loss += torch.exp(step_loss*1e-6)
-        #print(loss)
+            loss += step_loss*1e-13
+        print(loss)
         loss.backward()
         self.optimizer.step()
 
@@ -126,5 +126,6 @@ class Reinforcer(nn.Module):
         downlifted_s0 = self.act(self.downlift_s0(p_trans).squeeze().unsqueeze(2))
         downlifted_s1 = self.downlift_s1(downlifted_s0)
         action_probs = torch.softmax(self.p_state2action(downlifted_s1),dim=0)
+        #print(action_probs.shape)
         return action_probs
 
